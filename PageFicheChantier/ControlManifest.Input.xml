@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest>
+  <control namespace="Nexans" constructor="PageFicheChantier" version="0.0.41" display-name-key="PageFicheChantier" description-key="PageFicheChantier description" control-type="standard" >
+    <!--external-service-usage node declares whether this 3rd party PCF control is using external service or not, if yes, this control will be considered as premium and please also add the external domain it is using.
+    If it is not using any external service, please set the enabled="false" and DO NOT add any domain below. The "enabled" will be false by default.
+    Example1:
+      <external-service-usage enabled="true">
+        <domain>www.Microsoft.com</domain>
+      </external-service-usage>
+    Example2:
+      <external-service-usage enabled="false">
+      </external-service-usage>
+    -->
+    <external-service-usage enabled="true">
+      <domain>nexans.sharepoint.com</domain>
+    </external-service-usage>
+    <!-- property node identifies a specific, configurable piece of data that the control expects from CDS -->
+    <property name="projectData" display-name-key="Project_Data" description-key="JSON data for the project" of-type="SingleLine.TextArea" usage="input" required="true" />
+    <property name="latestChange" display-name-key="Latest_Change_JSON" description-key="JSON data for the latest change" of-type="SingleLine.TextArea" usage="output" required="false" />
+    <property name="navigationRequest" display-name-key="Navigation_Request" description-key="Request to navigate to another page" of-type="SingleLine.Text" usage="output" required="false" />
+    <!--
+      Property node's of-type attribute can be of-type-group attribute.
+      Example:
+      <type-group name="numbers">
+        <type>Whole.None</type>
+        <type>Currency</type>
+        <type>FP</type>
+        <type>Decimal</type>
+      </type-group>
+      <property name="sampleProperty" display-name-key="Property_Display_Key" description-key="Property_Desc_Key" of-type-group="numbers" usage="bound" required="true" />
+    -->
+    <resources>
+      <code path="index.ts" order="1"/>
+      <css path="css/output.css" order="1" />
+    </resources>
+    <!-- UNCOMMENT TO ENABLE THE SPECIFIED API
+    <feature-usage>
+      <uses-feature name="Device.captureAudio" required="true" />
+      <uses-feature name="Device.captureImage" required="true" />
+      <uses-feature name="Device.captureVideo" required="true" />
+      <uses-feature name="Device.getBarcodeValue" required="true" />
+      <uses-feature name="Device.getCurrentPosition" required="true" />
+      <uses-feature name="Device.pickFile" required="true" />
+      <uses-feature name="Utility" required="true" />
+      <uses-feature name="WebAPI" required="true" />
+    </feature-usage>
+    -->
+    <property name="accessoriesOptions" display-name-key="Accessories List JSON" description-key="JSON list of accessories" of-type="SingleLine.Text" usage="input" required="false" />
+    <property name="cablesOptions" display-name-key="Cables List JSON" description-key="JSON list of cables" of-type="SingleLine.Text" usage="input" required="false" />
+    <property name="monteursOptions" display-name-key="Monteurs List JSON" description-key="JSON list of monteurs" of-type="SingleLine.Text" usage="input" required="false" />
+  </control>
+</manifest>
