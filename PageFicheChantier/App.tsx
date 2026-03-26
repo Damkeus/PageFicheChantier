@@ -881,16 +881,19 @@ export default function App(props: IAppProps) {
   const handleSchemaSave = (elements: SchemaElement[]) => {
     const ordreSchema = generateOrdreSchema(elements);
     const schemaData = JSON.stringify(elements);
+    const newData = { ...data, schemaData, ordreSchema };
 
-    // Update local state - this triggers onDataChange -> latestChange output
-    setData(prev => ({
-      ...prev,
-      schemaData,
-      ordreSchema
-    }));
+    setData(newData);
 
-    // Optional: Feedback could be added here or in SchemaEditor
-    // For now we assume the Output change is the primary goal
+    if (onDataChange) {
+      const mappedData = mapProjectDataToSharePointData(
+        newData, fullAccessoriesList, fullCablesList, fullMonteursList
+      );
+      const fullData = { ...(rawSharePointData || {}), ...mappedData };
+      if (newData.id) { fullData.ID = parseInt(newData.id); fullData.id = newData.id; }
+      fullData._triggerTime = Date.now();
+      onDataChange(JSON.stringify(fullData));
+    }
   };
 
   if (appMode === 'schema') {
