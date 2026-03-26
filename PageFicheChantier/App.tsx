@@ -358,6 +358,24 @@ export default function App(props: IAppProps) {
             </div>
 
             <Input label="Adresse Chantier" value={data.siteAddress} readOnly={isViewMode} onChange={e => handleInputChange('siteAddress', e.target.value)} isTextArea rows={3} />
+
+            {/* Technical specs */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 border-t pt-4">
+              <Input label="Nombre Liaison" value={data.nombreLiaison} readOnly={isViewMode} onChange={e => handleInputChange('nombreLiaison', e.target.value)} />
+              <Input label="Nombre Jonction" value={data.nombreJonction} readOnly={isViewMode} onChange={e => handleInputChange('nombreJonction', e.target.value)} />
+              <Input label="Décret" value={data.decret} readOnly={isViewMode} onChange={e => handleInputChange('decret', e.target.value)} />
+              <Input label="Jonction de puissance" value={data.jonctionPuissance} readOnly={isViewMode} onChange={e => handleInputChange('jonctionPuissance', e.target.value)} />
+              <Input label="Tension" value={data.tension} readOnly={isViewMode} onChange={e => handleInputChange('tension', e.target.value)} />
+              <Input label="Type de Malt" value={data.typeMalt} readOnly={isViewMode} onChange={e => handleInputChange('typeMalt', e.target.value)} />
+            </div>
+
+            {/* Dates */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 border-t pt-4">
+              <Input label="Trimestre réalisation" type="date" value={data.trimestreRealisation} readOnly={isViewMode} onChange={e => handleInputChange('trimestreRealisation', e.target.value)} />
+              <Input label="MADU" type="date" value={data.madu} readOnly={isViewMode} onChange={e => handleInputChange('madu', e.target.value)} />
+              <Input label="Date de Consignation" type="date" value={data.dateConsignation} readOnly={isViewMode} onChange={e => handleInputChange('dateConsignation', e.target.value)} />
+              <Input label="Date de Fin de consignation" type="date" value={data.dateFinConsignation} readOnly={isViewMode} onChange={e => handleInputChange('dateFinConsignation', e.target.value)} />
+            </div>
           </div>
         );
 
@@ -398,6 +416,14 @@ export default function App(props: IAppProps) {
                   onChange={e => handleInputChange('testDuration', e.target.value)}
                 />
               </div>
+            </div>
+
+            {/* New Travaux fields */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 border-t pt-4">
+              <Input label="tores" value={data.tores} readOnly={isViewMode} onChange={e => handleInputChange('tores', e.target.value)} />
+              <Input label="Circuit" value={data.circuit} readOnly={isViewMode} onChange={e => handleInputChange('circuit', e.target.value)} />
+              <Input label="Extrémité Poste" value={data.extremitePoste} readOnly={isViewMode} onChange={e => handleInputChange('extremitePoste', e.target.value)} />
+              <Input label="Phénomène d'induction" value={data.phenomeneInduction} readOnly={isViewMode} onChange={e => handleInputChange('phenomeneInduction', e.target.value)} />
             </div>
           </div>
         );

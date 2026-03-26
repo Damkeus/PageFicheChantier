@@ -162,6 +162,13 @@ export interface ProjectData {
     jonctionPuissance: string;
     tension: string;
 
+    // New Travaux fields
+    tores: string;
+    circuit: string;
+    extremitePoste: string;
+    phenomeneInduction: string;
+    typeMalt: string;
+
     // Documents/Booleans
     ppsps: boolean;
     paq: boolean;
@@ -444,6 +451,13 @@ export interface RawProjectData {
     Jonctiondepuissance?: string;
     Tension?: string;
 
+    // New Travaux fields
+    tores?: string;
+    Circuit?: string;
+    Extr_x00e9_mit_x00e9_Poste?: string;
+    Ph_x00e9_nom_x00e8_nedinduction?: string;
+    TypedeMalt?: string;
+
     // Booleans
     PPSPS?: boolean;
     PAQ?: boolean;
@@ -595,6 +609,7 @@ export const INITIAL_DATA: ProjectData = {
     cables: [], accessories: [], testDuration: "",
     clientOrderNumber: "", linkName: "", length: "", gdp: "", gmr: "",
     decret: "", jonctionPuissance: "", tension: "",
+    tores: "", circuit: "", extremitePoste: "", phenomeneInduction: "", typeMalt: "",
 
     // Documents/Booleans
     ppsps: false, paq: false, ppe: false,
@@ -796,6 +811,11 @@ export const mapSharePointDataToProjectData = (jsonInput: string | RawProjectDat
         decret: raw.D_x00e9_cret || "",
         jonctionPuissance: raw.Jonctiondepuissance || "",
         tension: raw.Tension || "",
+        tores: raw.tores || "",
+        circuit: raw.Circuit || "",
+        extremitePoste: raw.Extr_x00e9_mit_x00e9_Poste || "",
+        phenomeneInduction: raw.Ph_x00e9_nom_x00e8_nedinduction || "",
+        typeMalt: raw.TypedeMalt || "",
 
         // Documents/Booleans
         ppsps: raw.PPSPS || false,
@@ -1002,6 +1022,11 @@ export const mapProjectDataToSharePointData = (
         GMR: data.gmr,
         D_x00e9_cret: data.decret,
         Jonctiondepuissance: data.jonctionPuissance,
+        tores: data.tores,
+        Circuit: data.circuit,
+        Extr_x00e9_mit_x00e9_Poste: data.extremitePoste,
+        Ph_x00e9_nom_x00e8_nedinduction: data.phenomeneInduction,
+        TypedeMalt: data.typeMalt,
 
         // Documents/Booleans
         PPSPS: data.ppsps,
