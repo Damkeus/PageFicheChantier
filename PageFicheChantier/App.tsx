@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { IInputs } from "./generated/ManifestTypes";
 import './css/input.css';
 
@@ -7,7 +7,7 @@ import { NAV_ITEMS, ProjectData, StepId, AppMode, mapSharePointDataToProjectData
 import { generateOrdreSchema } from './schemaConstants';
 import { Input, Select, TextArea, CableSelect, AccessoryList, BooleanCheckbox, MultiSelectCheckbox } from './components/Input';
 import { SchemaEditor } from './components/SchemaEditor';
-import { Check, Upload, FileText, Calendar, ArrowRight, ArrowLeft, MessageSquare, X, Users, PenTool, DownloadCloud, AlertCircle, Eye, ClipboardEdit, Database, Cable, PenLine, Loader2 } from 'lucide-react';
+import { Check, Upload, FileText, Calendar, ArrowRight, ArrowLeft, MessageSquare, X, Users, PenTool, DownloadCloud, AlertCircle, Eye, ClipboardEdit, Database, Cable, PenLine, Loader2, Monitor } from 'lucide-react';
 
 
 const CABLE_OPTIONS = [
@@ -154,6 +154,21 @@ export default function App(props: IAppProps) {
   const [appMode, setAppMode] = useState<AppMode>('landing');
   const [activeStep, setActiveStep] = useState<StepId>('general');
   const [data, setData] = useState<ProjectData>(getInitialData);
+
+  // Detect container width for mobile guard
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(9999);
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        setContainerWidth(entry.contentRect.width);
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // Track raw data to preserve unmapped SharePoint fields when broadcasting back
   const [rawSharePointData, setRawSharePointData] = useState<any>(null);
@@ -900,10 +915,27 @@ export default function App(props: IAppProps) {
     return <SchemaEditor onBack={() => setAppMode('landing')} onSave={handleSchemaSave} />;
   }
 
+  // Mobile guard — screen too small
+  if (containerWidth < 500) {
+    return (
+      <div ref={rootRef} className="absolute inset-0 flex items-center justify-center p-6" style={{ backgroundColor: '#88001f' }}>
+        <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-xs text-center">
+          <div className="bg-red-50 rounded-xl flex items-center justify-center mx-auto" style={{ width: '56px', height: '56px', marginBottom: '16px' }}>
+            <Monitor className="text-[#A30026]" style={{ width: '28px', height: '28px' }} />
+          </div>
+          <h2 className="font-bold text-gray-900" style={{ fontSize: '16px', marginBottom: '8px' }}>Appareil non compatible</h2>
+          <p className="text-gray-500 leading-relaxed" style={{ fontSize: '13px' }}>
+            La création de fiche chantier doit s'effectuer sur tablette ou ordinateur. Veuillez utiliser un autre appareil.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   // Landing Page Component
   if (appMode === 'landing') {
     return (
-      <div className="absolute inset-0 flex items-center justify-center p-4 sm:p-8 overflow-auto" style={{ backgroundColor: '#88001f' }}>
+      <div ref={rootRef} className="absolute inset-0 flex items-center justify-center p-4 sm:p-8 overflow-auto" style={{ backgroundColor: '#88001f' }}>
         <div className="absolute inset-0 overflow-hidden opacity-10 pointer-events-none">
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-white rounded-full blur-[100px]"></div>
         </div>
@@ -966,7 +998,7 @@ export default function App(props: IAppProps) {
 
   // Main App Interface
   return (
-    <div className="flex flex-col w-full h-full bg-gray-100 overflow-hidden font-sans">
+    <div ref={rootRef} className="flex flex-col w-full h-full bg-gray-100 overflow-hidden font-sans">
       {/* Top Header */}
       <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 shadow-sm z-30 flex-shrink-0">
         <div className="flex items-center gap-3 overflow-hidden">
