@@ -180,19 +180,16 @@ export default function App(props: IAppProps) {
     }
   }, [currentSchemaJson]);
 
-  // Detect container width for mobile guard
+  // Detect mobile portrait mode
   const rootRef = useRef<HTMLDivElement>(null);
-  const [containerWidth, setContainerWidth] = useState(9999);
+  const [isMobilePortrait, setIsMobilePortrait] = useState(false);
   useEffect(() => {
-    const el = rootRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(entries => {
-      for (const entry of entries) {
-        setContainerWidth(entry.contentRect.width);
-      }
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
+    const checkDevice = () => {
+      setIsMobilePortrait(window.innerWidth < 500 && window.innerHeight >= window.innerWidth);
+    };
+    checkDevice();
+    window.addEventListener('resize', checkDevice);
+    return () => window.removeEventListener('resize', checkDevice);
   }, []);
 
   // Track raw data to preserve unmapped SharePoint fields when broadcasting back
@@ -406,8 +403,6 @@ export default function App(props: IAppProps) {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 border-t pt-4">
               <Input label="Trimestre réalisation" type="date" value={data.trimestreRealisation} readOnly={isViewMode} onChange={e => handleInputChange('trimestreRealisation', e.target.value)} />
               <Input label="MADU" type="date" value={data.madu} readOnly={isViewMode} onChange={e => handleInputChange('madu', e.target.value)} />
-              <Input label="Date de Consignation" type="date" value={data.dateConsignation} readOnly={isViewMode} onChange={e => handleInputChange('dateConsignation', e.target.value)} />
-              <Input label="Date de Fin de consignation" type="date" value={data.dateFinConsignation} readOnly={isViewMode} onChange={e => handleInputChange('dateFinConsignation', e.target.value)} />
             </div>
           </div>
         );
@@ -439,14 +434,28 @@ export default function App(props: IAppProps) {
                 readOnly={isViewMode}
               />
 
-              {/* Test Duration */}
-              <div>
+              {/* Test Duration & Consignation */}
+              <div className="flex flex-col gap-6">
                 <Input
                   label="Durée des essais (jours)"
                   type="number"
                   value={data.testDuration}
                   readOnly={isViewMode}
                   onChange={e => handleInputChange('testDuration', e.target.value)}
+                />
+                <Input
+                  label="Date de Consignation"
+                  type="date"
+                  value={data.dateConsignation}
+                  readOnly={isViewMode}
+                  onChange={e => handleInputChange('dateConsignation', e.target.value)}
+                />
+                <Input
+                  label="Date de Fin de consignation"
+                  type="date"
+                  value={data.dateFinConsignation}
+                  readOnly={isViewMode}
+                  onChange={e => handleInputChange('dateFinConsignation', e.target.value)}
                 />
               </div>
             </div>
@@ -990,7 +999,7 @@ export default function App(props: IAppProps) {
   }
 
   // Mobile guard — screen too small
-  if (containerWidth < 500) {
+  if (isMobilePortrait) {
     return (
       <div ref={rootRef} className="absolute inset-0 flex items-center justify-center p-6" style={{ backgroundColor: '#88001f' }}>
         <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-xs text-center">
