@@ -1,0 +1,192 @@
+/**
+ * Moteur de confiance (confidence) — PageFicheChantier.
+ *
+ * Calé sur le format réel de sortie AI Builder (modèle de traitement de
+ * document). Le JSON contient un objet `labels` où CHAQUE champ est un objet
+ * "expando" :
+ *   labels: {
+ *     "Tores": {
+ *       "@odata.type": "#Microsoft.Dynamics.CRM.expando",
+ *       "value": "Le Titulaire n'est pas en charge...",
+ *       "text":  "Le Titulaire n'est pas en charge...",
+ *       "displayName": "Tores",
+ *       "fieldType": "string",
+ *       "confidence": 0.235,
+ *       "valueLocation": { ... }
+ *     },
+ *     "Circuit": { ... }, "Liaison": { ... }, ...
+ *   }
+ * et un objet `tables` pour les tableaux extraits.
+ *
+ * Seuils métier :
+ *   confidence > 0.8            → vert   (conforme)
+ *   0.5 < confidence <= 0.8     → orange (à vérifier)
+ *   confidence <= 0.5 / vide    → rouge  (erreur / manquant)
+ *
+ * ⚠️ ADAPTER : si le schéma diffère (ex. labels imbriqués sous
+ * `analyzeResult` ou `prediction`), ajuster UNIQUEMENT `extractLabels()` —
+ * le reste du moteur et l'UI restent inchangés.
+ */
+import * as React from 'react';
+
+export type ConfidenceLevel = 'green' | 'orange' | 'red';
+
+export interface ConfidenceColors {
+  border: string;
+  ring: string;
+  badgeBg: string;
+  badgeText: string;
+}
+
+/** Palette alignée sur le Design System Nexans (cf. theme/nexansTheme.ts). */
+export const CONFIDENCE_COLORS: Record<ConfidenceLevel, ConfidenceColors> = {
+  green: { border: '#1F9D55', ring: 'rgba(31,157,85,0.18)', badgeBg: 'rgba(31,157,85,0.10)', badgeText: '#1F9D55' },
+  orange: { border: '#E8830C', ring: 'rgba(232,131,12,0.20)', badgeBg: 'rgba(232,131,12,0.12)', badgeText: '#B45F08' },
+  red: { border: '#C90016', ring: 'rgba(201,0,22,0.18)', badgeBg: 'rgba(201,0,22,0.10)', badgeText: '#C90016' },
+};
+
+export const CONFIDENCE_LABEL: Record<ConfidenceLevel, string> = {
+  green: 'Conforme',
+  orange: 'À vérifier',
+  red: 'Manquant',
+};
+
+/** Champ de confiance normalisé, exploitable par l'UI. */
+export interface FieldConfidence {
+  /** Clé brute AI Builder (avec suffixe GUID éventuel). */
+  key: string;
+  /** Nom lisible (displayName) — sert de clé d'appariement avec le formulaire. */
+  displayName: string;
+  value: string;
+  confidence: number;
+  level: ConfidenceLevel;
+  fieldType: string;
+}
+
+interface RawExpandoField {
+  value?: unknown;
+  text?: string;
+  displayName?: string;
+  fieldType?: string;
+  confidence?: number;
+}
+
+/**
+ * Classe un score en niveau métier. Une valeur vide est toujours "red"
+ * (champ manquant) quel que soit le score.
+ */
+export function confidenceLevel(score: number | undefined, isEmpty: boolean): ConfidenceLevel {
+  if (isEmpty || score === undefined || Number.isNaN(score)) return 'red';
+  if (score > 0.8) return 'green';
+  if (score > 0.5) return 'orange';
+  return 'red';
+}
+
+/**
+ * Normalise un nom de champ pour l'appariement formulaire ↔ AI Builder :
+ * minuscules, sans accents, sans suffixe GUID/hexadécimal, espaces/underscores
+ * réduits. Ex. "Nombre_02bf9c05..." → "nombre", "Tores" → "tores".
+ */
+export function normalizeFieldName(name: string): string {
+  return name
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '') // accents
+    .replace(/[_\s]*[0-9a-f]{16,}$/i, '') // suffixe GUID/hash AI Builder
+    .replace(/[_\s]+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * Point d'adaptation : localise l'objet `labels` dans le JSON brut.
+ * Couvre les emplacements usuels d'AI Builder.
+ */
+function extractLabels(root: Record<string, unknown>): Record<string, RawExpandoField> | null {
+  const candidates: unknown[] = [
+    root.labels,
+    (root.analyzeResult as Record<string, unknown> | undefined)?.labels,
+    (root.prediction as Record<string, unknown> | undefined)?.labels,
+  ];
+  for (const c of candidates) {
+    if (c && typeof c === 'object') return c as Record<string, RawExpandoField>;
+  }
+  return null;
+}
+
+function toText(field: RawExpandoField): string {
+  const v = field.value ?? field.text ?? '';
+  return typeof v === 'string' ? v : String(v ?? '');
+}
+
+/**
+ * Parse le JSON AI Builder et construit la table de confiance indexée par
+ * `normalizeFieldName(displayName)`. Tolère un JSON vide/invalide (→ Map vide).
+ */
+export function buildConfidenceMap(json: string | undefined | null): Map<string, FieldConfidence> {
+  const map = new Map<string, FieldConfidence>();
+  if (!json || !json.trim() || json.trim() === 'val') return map;
+
+  let root: Record<string, unknown>;
+  try {
+    root = JSON.parse(json) as Record<string, unknown>;
+  } catch {
+    return map;
+  }
+
+  const labels = extractLabels(root);
+  if (!labels) return map;
+
+  for (const [key, raw] of Object.entries(labels)) {
+    if (!raw || typeof raw !== 'object') continue;
+    const displayName = raw.displayName || key;
+    const value = toText(raw);
+    const level = confidenceLevel(raw.confidence, value.trim() === '');
+    map.set(normalizeFieldName(displayName), {
+      key,
+      displayName,
+      value,
+      confidence: typeof raw.confidence === 'number' ? raw.confidence : 0,
+      level,
+      fieldType: raw.fieldType || 'string',
+    });
+  }
+  return map;
+}
+
+/** Récupère la confiance d'un champ par n'importe lequel de ses libellés. */
+export function lookupConfidence(
+  map: Map<string, FieldConfidence>,
+  ...labels: string[]
+): FieldConfidence | undefined {
+  for (const l of labels) {
+    const hit = map.get(normalizeFieldName(l));
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+/** Indique si la fiche est encore en attente de l'IA (JSON vide/null). */
+export function isAwaitingAi(json: string | undefined | null): boolean {
+  if (json === undefined || json === null) return true;
+  const t = json.trim();
+  if (t === '' || t === 'val' || t === 'null' || t === '{}' || t === '[]') return true;
+  try {
+    const parsed = JSON.parse(t) as unknown;
+    if (parsed === null) return true;
+    if (typeof parsed === 'object' && Object.keys(parsed as object).length === 0) return true;
+  } catch {
+    // JSON invalide => on considère que rien n'est encore exploitable.
+    return true;
+  }
+  return false;
+}
+
+// ── Contexte React : diffuse la table de confiance à tous les Input ──
+export const ConfidenceContext = React.createContext<Map<string, FieldConfidence>>(new Map());
+
+/** Hook utilisé par le composant Input pour s'auto-colorer selon son label. */
+export function useFieldConfidence(label: string | undefined): FieldConfidence | undefined {
+  const map = React.useContext(ConfidenceContext);
+  if (!label) return undefined;
+  return map.get(normalizeFieldName(label));
+}

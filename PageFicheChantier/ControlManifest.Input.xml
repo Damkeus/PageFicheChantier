@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Nexans" constructor="PageFicheChantier" version="0.0.43" display-name-key="PageFicheChantier" description-key="PageFicheChantier description" control-type="standard" >
+  <control namespace="Nexans" constructor="PageFicheChantier" version="0.0.45" display-name-key="PageFicheChantier" description-key="PageFicheChantier description" control-type="standard" >
     <!--external-service-usage node declares whether this 3rd party PCF control is using external service or not, if yes, this control will be considered as premium and please also add the external domain it is using.
     If it is not using any external service, please set the enabled="false" and DO NOT add any domain below. The "enabled" will be false by default.
     Example1:
@@ -45,8 +45,11 @@
       <uses-feature name="WebAPI" required="true" />
     </feature-usage>
     -->
+    <property name="currentSchema" display-name-key="Current_Schema_JSON" description-key="JSON of the saved liaisons/schemas, read on load" of-type="SingleLine.TextArea" usage="input" required="false" />
+    <property name="schemaChange" display-name-key="Schema_Change_JSON" description-key="JSON of the liaisons/schemas emitted on save" of-type="SingleLine.TextArea" usage="output" required="false" />
     <property name="accessoriesOptions" display-name-key="Accessories List JSON" description-key="JSON list of accessories" of-type="SingleLine.Text" usage="input" required="false" />
     <property name="cablesOptions" display-name-key="Cables List JSON" description-key="JSON list of cables" of-type="SingleLine.Text" usage="input" required="false" />
     <property name="monteursOptions" display-name-key="Monteurs List JSON" description-key="JSON list of monteurs" of-type="SingleLine.Text" usage="input" required="false" />
+    <property name="Input_CCTPJson" display-name-key="CCTP_AI_JSON" description-key="Allégé JSON (labels + tables) extrait du CCTP par AI Builder, poussé par Power Apps" of-type="SingleLine.Text" usage="input" required="false" />
   </control>
 </manifest>

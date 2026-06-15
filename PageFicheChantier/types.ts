@@ -21,6 +21,22 @@ export interface SchemaElement {
     y: number;
     orientation?: 'left' | 'right'; // For terminations
     hasZ?: boolean; // For "NZO" / Z-mark toggle (optional)
+    label?: string; // Free editable text displayed on the element card
+}
+
+// A "liaison" is one single-line diagram (schéma unifilaire).
+// Several liaisons can be created and saved together.
+export interface SchemaLiaison {
+    id: string;
+    comment: string; // Free comment for this liaison
+    ordreSchema: string; // "1,4,5,1" — element type codes (1-6), reconstruction key
+    elements: SchemaElement[]; // Full element data (incl. labels) for faithful rebuild
+}
+
+// Envelope serialized into the `currentSchema` property, read by other PCFs.
+export interface CurrentSchema {
+    version: number;
+    liaisons: SchemaLiaison[];
 }
 
 export interface SchemaTool {

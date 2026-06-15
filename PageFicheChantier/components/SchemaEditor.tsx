@@ -1,6 +1,7 @@
-import React, { useState, useRef } from 'react';
-import { Download, ArrowLeft, Trash2, Hash, HelpCircle, X, Move } from 'lucide-react';
-import { SchemaElement, SchemaTool } from '../types';
+import React, { useState, useEffect, useRef } from 'react';
+import { Download, ArrowLeft, Trash2, HelpCircle, X, Move, Plus, Tag } from 'lucide-react';
+import { SchemaElement, SchemaTool, SchemaLiaison } from '../types';
+import { generateOrdreSchema, generateLiaisonId } from '../schemaConstants';
 
 // Import Base64 Assets from assets.ts
 import {
@@ -13,14 +14,48 @@ import {
 } from '../assets/assets';
 
 interface SchemaEditorProps {
+    initialLiaisons: SchemaLiaison[];
     onBack: () => void;
-    onSave: (elements: SchemaElement[]) => void;
+    onSave: (liaisons: SchemaLiaison[]) => void;
 }
 
-export const SchemaEditor: React.FC<SchemaEditorProps> = ({ onBack, onSave }) => {
+const makeLiaison = (): SchemaLiaison => ({
+    id: generateLiaisonId(),
+    comment: '',
+    ordreSchema: '',
+    elements: [],
+});
+
+export const SchemaEditor: React.FC<SchemaEditorProps> = ({ initialLiaisons, onBack, onSave }) => {
     const canvasRef = useRef<HTMLDivElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
-    const [elements, setElements] = useState<SchemaElement[]>([]);
+
+    // Multi-liaison state — each liaison is its own single-line diagram
+    const [liaisons, setLiaisons] = useState<SchemaLiaison[]>(() =>
+        initialLiaisons.length > 0 ? initialLiaisons : [makeLiaison()]
+    );
+    const [activeLiaisonId, setActiveLiaisonId] = useState<string>(() =>
+        (initialLiaisons[0]?.id) || ''
+    );
+
+    // Keep the active liaison id valid after add/delete
+    useEffect(() => {
+        if (!liaisons.find(l => l.id === activeLiaisonId)) {
+            setActiveLiaisonId(liaisons[0]?.id ?? '');
+        }
+    }, [liaisons, activeLiaisonId]);
+
+    const activeLiaison = liaisons.find(l => l.id === activeLiaisonId) ?? liaisons[0];
+    const elements = activeLiaison?.elements ?? [];
+
+    // Update the elements of the active liaison (immutable)
+    const setElements = (updater: (prev: SchemaElement[]) => SchemaElement[]) => {
+        setLiaisons(prev => prev.map(l =>
+            l.id === (activeLiaison?.id)
+                ? { ...l, elements: updater(l.elements) }
+                : l
+        ));
+    };
 
     // UI State
     const [showHelp, setShowHelp] = useState(true);
@@ -43,6 +78,8 @@ export const SchemaEditor: React.FC<SchemaEditorProps> = ({ onBack, onSave }) =>
 
     // Double-click detection
     const [lastClickTime, setLastClickTime] = useState<{ id: string; time: number } | null>(null);
+
+    const selectedElement = elements.find(e => e.id === selectedElementId) ?? null;
 
     const TOOLS: SchemaTool[] = [
         { id: 't-simple', type: 'termination', subtype: 'simple', label: 'Extrémité' },
@@ -102,10 +139,44 @@ export const SchemaEditor: React.FC<SchemaEditorProps> = ({ onBack, onSave }) =>
         return '';
     };
 
-    // --- Handlers ---
+    // --- Liaison handlers ---
+    const handleAddLiaison = () => {
+        const nl = makeLiaison();
+        setLiaisons(prev => [...prev, nl]);
+        setActiveLiaisonId(nl.id);
+        setSelectedElementId(null);
+        setSelectedTool(null);
+    };
 
-    // 🔥 REMOVED: All HTML5 drag & drop handlers for Power Platform compatibility
-    // No more: draggable, onDragStart, onDragEnd, onDrop, onDragOver
+    const handleSelectLiaison = (id: string) => {
+        setActiveLiaisonId(id);
+        setSelectedElementId(null);
+        setSelectedTool(null);
+    };
+
+    const handleDeleteLiaison = (id: string) => {
+        setLiaisons(prev => {
+            const filtered = prev.filter(l => l.id !== id);
+            return filtered.length > 0 ? filtered : [makeLiaison()];
+        });
+        setSelectedElementId(null);
+    };
+
+    const handleCommentChange = (val: string) => {
+        if (!activeLiaison) return;
+        setLiaisons(prev => prev.map(l =>
+            l.id === activeLiaison.id ? { ...l, comment: val } : l
+        ));
+    };
+
+    const handleLabelChange = (val: string) => {
+        if (!selectedElementId) return;
+        setElements(prev => prev.map(el =>
+            el.id === selectedElementId ? { ...el, label: val } : el
+        ));
+    };
+
+    // --- Handlers ---
 
     // Custom mouse-based drag for tools (Power Platform compatible)
     const handleToolMouseDown = (e: React.MouseEvent, tool: SchemaTool) => {
@@ -263,6 +334,8 @@ export const SchemaEditor: React.FC<SchemaEditorProps> = ({ onBack, onSave }) =>
         }
     };
 
+    const liveOrdre = generateOrdreSchema(elements);
+
     return (
         <div
             ref={containerRef}
@@ -271,7 +344,7 @@ export const SchemaEditor: React.FC<SchemaEditorProps> = ({ onBack, onSave }) =>
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
         >
-            {/* 🔥 NEW: Left Sidebar Toolbar */}
+            {/* Left Sidebar Toolbar */}
             <div className="w-28 bg-white border-r border-gray-200 flex flex-col shadow-lg z-50">
                 {/* Header */}
                 <div className="p-4 border-b border-gray-200">
@@ -348,7 +421,7 @@ export const SchemaEditor: React.FC<SchemaEditorProps> = ({ onBack, onSave }) =>
                     </button>
 
                     <button
-                        onClick={() => onSave(elements)}
+                        onClick={() => onSave(liaisons)}
                         className="w-full p-3 bg-[#A30026] text-white rounded-xl shadow-lg hover:bg-[#8a0020] active:scale-95 transition-all flex items-center justify-center gap-2 font-bold"
                     >
                         <Download className="w-4 h-4" />
@@ -357,11 +430,65 @@ export const SchemaEditor: React.FC<SchemaEditorProps> = ({ onBack, onSave }) =>
                 </div>
             </div>
 
-            {/* 🔥 IMPROVED: Canvas Area - Centered and larger */}
-            <div className="flex-1 flex flex-col items-center justify-center p-8 overflow-hidden">
+            {/* Canvas Area Column */}
+            <div className="flex-1 flex flex-col p-6 overflow-hidden">
+                {/* 🔥 NEW: Liaison tab bar */}
+                <div className="flex items-center gap-2 mb-3 flex-wrap">
+                    {liaisons.map((l, idx) => {
+                        const isActive = l.id === activeLiaison?.id;
+                        return (
+                            <div
+                                key={l.id}
+                                onClick={() => handleSelectLiaison(l.id)}
+                                className={`group flex items-center gap-2 pl-3 pr-2 py-2 rounded-xl cursor-pointer transition-all border ${isActive
+                                    ? 'bg-[#A30026] text-white border-[#A30026] shadow-md'
+                                    : 'bg-white text-gray-600 border-gray-200 hover:border-[#A30026]/40 hover:text-gray-900'
+                                    }`}
+                            >
+                                <span className="text-xs font-bold">Liaison {idx + 1}</span>
+                                {l.comment && (
+                                    <span className={`text-[10px] truncate max-w-[120px] ${isActive ? 'text-white/80' : 'text-gray-400'}`}>
+                                        {l.comment}
+                                    </span>
+                                )}
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); handleDeleteLiaison(l.id); }}
+                                    className={`rounded-full p-0.5 transition-colors ${isActive ? 'hover:bg-white/20' : 'hover:bg-gray-100'}`}
+                                    title="Supprimer la liaison"
+                                >
+                                    <X className="w-3.5 h-3.5" />
+                                </button>
+                            </div>
+                        );
+                    })}
+                    <button
+                        onClick={handleAddLiaison}
+                        className="flex items-center gap-1 px-3 py-2 rounded-xl bg-white border border-dashed border-gray-300 text-gray-500 hover:border-[#A30026] hover:text-[#A30026] transition-all text-xs font-bold"
+                    >
+                        <Plus className="w-4 h-4" />
+                        Liaison
+                    </button>
+                </div>
+
+                {/* 🔥 NEW: Active liaison comment + live order */}
+                <div className="flex items-center gap-3 mb-3">
+                    <input
+                        type="text"
+                        value={activeLiaison?.comment ?? ''}
+                        onChange={(e) => handleCommentChange(e.target.value)}
+                        placeholder="Commentaire de la liaison (lu par les autres PCF)"
+                        className="flex-1 px-3 py-2 rounded-xl border border-gray-200 text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#A30026]/40 focus:border-[#A30026]"
+                    />
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white border border-gray-200 text-xs font-bold text-gray-500 whitespace-nowrap">
+                        <span className="text-gray-400 uppercase tracking-wider">Ordre</span>
+                        <span className="text-[#A30026]">{liveOrdre || '—'}</span>
+                    </div>
+                </div>
+
+                {/* Canvas */}
                 <div
                     ref={canvasRef}
-                    className={`w-full h-full max-w-7xl bg-white rounded-2xl shadow-2xl border-2 border-gray-200 overflow-hidden relative ${selectedTool ? 'cursor-cell' : 'cursor-crosshair'}`}
+                    className={`flex-1 w-full bg-white rounded-2xl shadow-2xl border-2 border-gray-200 overflow-hidden relative ${selectedTool ? 'cursor-cell' : 'cursor-crosshair'}`}
                     onClick={handleCanvasClick}
                 >
                     <svg className="w-full h-full">
@@ -410,15 +537,48 @@ export const SchemaEditor: React.FC<SchemaEditorProps> = ({ onBack, onSave }) =>
                                         </g>
                                     )}
                                 </g>
+
+                                {/* 🔥 NEW: Element label text (orientation-independent) */}
+                                {el.label && (
+                                    <text
+                                        x="0" y="72"
+                                        textAnchor="middle"
+                                        fontSize="13"
+                                        fontWeight="600"
+                                        fill="#1f2937"
+                                        className="select-none pointer-events-none"
+                                    >
+                                        {el.label}
+                                    </text>
+                                )}
                             </g>
                         ))}
                     </svg>
 
-                    {/* Selected element indicator */}
-                    {selectedElementId && (
-                        <div className="absolute top-4 right-4 bg-[#A30026] text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 animate-in fade-in slide-in-from-top-2">
-                            <Move className="w-4 h-4" />
-                            <span className="text-xs font-bold">Élément sélectionné - Déplacez-le</span>
+                    {/* 🔥 IMPROVED: Selected element panel with editable label */}
+                    {selectedElement && (
+                        <div
+                            className="absolute top-4 right-4 bg-white/95 backdrop-blur-md border border-gray-200 px-4 py-3 rounded-xl shadow-2xl flex flex-col gap-2 w-64 animate-in fade-in slide-in-from-top-2"
+                            onClick={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
+                        >
+                            <div className="flex items-center gap-2 text-[#A30026]">
+                                <Move className="w-4 h-4" />
+                                <span className="text-xs font-bold">Élément sélectionné</span>
+                            </div>
+                            <label className="flex items-center gap-2 text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+                                <Tag className="w-3.5 h-3.5" />
+                                Texte / repère
+                            </label>
+                            <input
+                                type="text"
+                                value={selectedElement.label ?? ''}
+                                onChange={(e) => handleLabelChange(e.target.value)}
+                                placeholder="Ex: R1, Poste 2…"
+                                autoFocus
+                                className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#A30026]/40 focus:border-[#A30026]"
+                            />
+                            <p className="text-[10px] text-gray-400 leading-tight">Glissez l'élément pour le déplacer. Double-clic pour inverser une extrémité.</p>
                         </div>
                     )}
                 </div>
@@ -444,12 +604,12 @@ export const SchemaEditor: React.FC<SchemaEditorProps> = ({ onBack, onSave }) =>
                             <span>Sélectionner un outil puis cliquer sur le canvas pour le placer</span>
                         </li>
                         <li className="flex items-start gap-3">
-                            <span className="bg-red-50 border border-[#A30026] text-[#A30026] px-1.5 py-0.5 rounded font-bold text-[9px] min-w-[55px] text-center tracking-wide">DÉPLACER</span>
-                            <span>Cliquer et glisser un élément posé pour le repositionner</span>
+                            <span className="bg-red-50 border border-[#A30026] text-[#A30026] px-1.5 py-0.5 rounded font-bold text-[9px] min-w-[55px] text-center tracking-wide">TEXTE</span>
+                            <span>Sélectionner un élément pour lui ajouter un repère/texte</span>
                         </li>
                         <li className="flex items-start gap-3">
-                            <span className="bg-red-50 border border-[#A30026] text-[#A30026] px-1.5 py-0.5 rounded font-bold text-[9px] min-w-[55px] text-center tracking-wide">DBL-CLIC</span>
-                            <span>Double-cliquer sur une extrémité pour inverser l'orientation</span>
+                            <span className="bg-red-50 border border-[#A30026] text-[#A30026] px-1.5 py-0.5 rounded font-bold text-[9px] min-w-[55px] text-center tracking-wide">LIAISON</span>
+                            <span>Ajouter plusieurs liaisons via les onglets en haut</span>
                         </li>
                         <li className="flex items-start gap-3">
                             <span className="bg-green-50 border border-green-500 text-green-700 px-1.5 py-0.5 rounded font-bold text-[9px] min-w-[55px] text-center tracking-wide">AIMANT</span>

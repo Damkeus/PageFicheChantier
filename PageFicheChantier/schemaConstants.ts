@@ -1,4 +1,6 @@
-import { SchemaElement } from './types';
+import { SchemaElement, SchemaLiaison, CurrentSchema } from './types';
+
+export const CURRENT_SCHEMA_VERSION = 1;
 
 /**
  * Numeric IDs for schema elements (fixed mapping)
@@ -102,4 +104,90 @@ export function reconstructElementsFromOrdre(
             orientation: 'left',
         } as SchemaElement;
     }).filter(el => el !== null);
+}
+
+/**
+ * Generate a stable-ish unique id for a new liaison.
+ */
+export function generateLiaisonId(): string {
+    return `l_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+}
+
+/**
+ * Serialize liaisons into the `currentSchema` JSON envelope.
+ * Recomputes each liaison's ordreSchema from its elements so it stays in sync.
+ */
+export function serializeCurrentSchema(liaisons: SchemaLiaison[]): string {
+    const payload: CurrentSchema = {
+        version: CURRENT_SCHEMA_VERSION,
+        liaisons: liaisons.map(l => ({
+            id: l.id || generateLiaisonId(),
+            comment: l.comment || '',
+            ordreSchema: generateOrdreSchema(l.elements || []),
+            elements: l.elements || [],
+        })),
+    };
+    return JSON.stringify(payload);
+}
+
+/**
+ * Parse the `currentSchema` JSON envelope into a liaison array.
+ * Robust: invalid/empty input returns [].
+ * Optional legacy migration: if currentSchema is empty but a legacy
+ * schemaData/ordreSchema exists, wrap it into a single liaison.
+ */
+export function parseCurrentSchema(
+    json: string,
+    legacy?: { schemaData?: string; ordreSchema?: string }
+): SchemaLiaison[] {
+    const fromCurrent = parseCurrentSchemaRaw(json);
+    if (fromCurrent.length > 0) return fromCurrent;
+
+    // Legacy migration fallback
+    if (legacy && (legacy.schemaData || legacy.ordreSchema)) {
+        let elements: SchemaElement[] = [];
+        if (legacy.schemaData) {
+            try {
+                const parsed = JSON.parse(legacy.schemaData);
+                if (Array.isArray(parsed)) elements = parsed as SchemaElement[];
+            } catch {
+                elements = [];
+            }
+        }
+        if (elements.length === 0 && legacy.ordreSchema) {
+            elements = reconstructElementsFromOrdre(legacy.ordreSchema);
+        }
+        if (elements.length > 0) {
+            return [{
+                id: generateLiaisonId(),
+                comment: '',
+                ordreSchema: generateOrdreSchema(elements),
+                elements,
+            }];
+        }
+    }
+
+    return [];
+}
+
+function parseCurrentSchemaRaw(json: string): SchemaLiaison[] {
+    if (!json?.trim()) return [];
+    try {
+        const parsed = JSON.parse(json);
+        const liaisons = Array.isArray(parsed) ? parsed : parsed?.liaisons;
+        if (!Array.isArray(liaisons)) return [];
+        return liaisons
+            .filter((l: unknown): l is Record<string, unknown> => !!l && typeof l === 'object')
+            .map((l): SchemaLiaison => {
+                const elements = Array.isArray(l.elements) ? (l.elements as SchemaElement[]) : [];
+                return {
+                    id: typeof l.id === 'string' && l.id ? l.id : generateLiaisonId(),
+                    comment: typeof l.comment === 'string' ? l.comment : '',
+                    ordreSchema: typeof l.ordreSchema === 'string' ? l.ordreSchema : generateOrdreSchema(elements),
+                    elements,
+                };
+            });
+    } catch {
+        return [];
+    }
 }

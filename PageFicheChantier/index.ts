@@ -10,6 +10,7 @@ export class PageFicheChantier implements ComponentFramework.StandardControl<IIn
     // Output values — initialized to ""
     private _latestChange = "";
     private _navigationRequest = "";
+    private _schemaChange = "";
 
     constructor() {
         // Empty
@@ -34,14 +35,21 @@ export class PageFicheChantier implements ComponentFramework.StandardControl<IIn
         const props: IAppProps = {
             pcfContext: context,
             projectDataJson: context.parameters.projectData.raw || "",
+            currentSchemaJson: context.parameters.currentSchema?.raw || "",
             accessoriesOptionsJson: context.parameters.accessoriesOptions?.raw || "",
             cablesOptionsJson: context.parameters.cablesOptions?.raw || "",
             monteursOptionsJson: context.parameters.monteursOptions?.raw || "",
+            cctpJson: context.parameters.Input_CCTPJson?.raw || "",
             onDataChange: (newDataJson: string) => {
                 console.log("[PCF index.ts] onDataChange called, JSON length:", newDataJson.length);
                 this._latestChange = newDataJson;
                 this._notifyOutputChanged();
                 console.log("[PCF index.ts] notifyOutputChanged() called successfully");
+            },
+            onSchemaChange: (schemaJson: string) => {
+                console.log("[PCF index.ts] onSchemaChange called, JSON length:", schemaJson.length);
+                this._schemaChange = schemaJson;
+                this._notifyOutputChanged();
             },
             onNavigate: (target: string) => {
                 this._navigationRequest = target;
@@ -60,6 +68,7 @@ export class PageFicheChantier implements ComponentFramework.StandardControl<IIn
         return {
             latestChange: this._latestChange,
             navigationRequest: this._navigationRequest,
+            schemaChange: this._schemaChange,
         };
     }
 

@@ -1,38 +1,100 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Cable, Search, Check, ChevronDown, X } from 'lucide-react';
+import {
+  useFieldConfidence,
+  confidenceLevel,
+  CONFIDENCE_COLORS,
+  CONFIDENCE_LABEL,
+  ConfidenceLevel,
+} from '../confidence';
 
 interface InputProps extends React.InputHTMLAttributes<HTMLInputElement | HTMLTextAreaElement> {
   label: string;
   fullWidth?: boolean;
   isTextArea?: boolean;
   rows?: number;
+  /** Score de confiance explicite (0..1). Sinon résolu via le contexte sur le label. */
+  confidence?: number;
+  /** Désactive la coloration de confiance pour ce champ. */
+  noConfidence?: boolean;
 }
 
-export const Input: React.FC<InputProps> = ({ label, fullWidth = true, className = '', readOnly, isTextArea = false, rows = 3, ...props }) => {
+/** Badge de niveau (Conforme / À vérifier / Manquant) à droite du label. */
+const ConfidenceBadge: React.FC<{ level: ConfidenceLevel }> = ({ level }) => {
+  const c = CONFIDENCE_COLORS[level];
+  return (
+    <span
+      style={{
+        fontSize: '9px',
+        fontWeight: 700,
+        textTransform: 'none',
+        letterSpacing: 0,
+        padding: '1px 7px',
+        borderRadius: 999,
+        background: c.badgeBg,
+        color: c.badgeText,
+        border: `1px solid ${c.border}`,
+      }}
+    >
+      {CONFIDENCE_LABEL[level]}
+    </span>
+  );
+};
+
+export const Input: React.FC<InputProps> = ({ label, fullWidth = true, className = '', readOnly, isTextArea = false, rows = 3, confidence, noConfidence, onChange, ...props }) => {
+  const ctxConf = useFieldConfidence(noConfidence ? undefined : label);
+  const [touched, setTouched] = useState(false);
+
+  // Niveau effectif. Tous les champs sont couverts :
+  //  - modifié par l'humain → vert
+  //  - vide → neutre "Non renseigné" (jamais rouge, non obligatoire)
+  //  - score IA dispo → seuils vert/orange/rouge
+  //  - valeur présente sans score IA → vert
+  const isEmpty = props.value === undefined || props.value === null || String(props.value).trim() === '';
+  const score = confidence !== undefined ? confidence : ctxConf?.confidence;
+  let level: ConfidenceLevel | undefined;
+  if (!noConfidence && !readOnly) {
+    level = touched ? 'green' : confidenceLevel(score, isEmpty);
+  }
+
+  const handleChange: React.ChangeEventHandler<HTMLInputElement | HTMLTextAreaElement> = (e) => {
+    if (!touched) setTouched(true);
+    if (onChange) onChange(e);
+  };
+
+  const confStyle: React.CSSProperties = level
+    ? { borderColor: CONFIDENCE_COLORS[level].border, boxShadow: `0 0 0 2px ${CONFIDENCE_COLORS[level].ring}` }
+    : {};
+
   return (
     <div className={`flex flex-col gap-1.5 ${fullWidth ? 'w-full' : ''}`}>
-      <label className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
-        {label}
+      <label className="text-xs font-semibold text-gray-700 uppercase tracking-wide flex items-center justify-between gap-2">
+        <span>{label}</span>
+        {level && <ConfidenceBadge level={level} />}
       </label>
       {isTextArea ? (
         <textarea
           readOnly={readOnly}
           rows={rows}
+          style={confStyle}
+          onChange={handleChange}
           className={`px-3 py-2.5 bg-white border border-gray-300 text-gray-900 text-sm rounded outline-none transition-all shadow-sm placeholder-gray-400 resize-none
             ${readOnly
               ? 'bg-gray-50 text-gray-600 border-gray-200 cursor-default focus:ring-0'
-              : 'focus:ring-2 focus:ring-[#c2002f] focus:border-[#c2002f]'} 
+              : 'focus:ring-2 focus:ring-[#c2002f] focus:border-[#c2002f]'}
             ${className}`}
           {...(props as React.TextareaHTMLAttributes<HTMLTextAreaElement>)}
         />
       ) : (
         <input
           readOnly={readOnly}
-          className={`px-3 py-2.5 bg-white border border-gray-300 text-gray-900 text-sm rounded outline-none transition-all shadow-sm placeholder-gray-400 
+          style={confStyle}
+          onChange={handleChange}
+          className={`px-3 py-2.5 bg-white border border-gray-300 text-gray-900 text-sm rounded outline-none transition-all shadow-sm placeholder-gray-400
             ${readOnly
               ? 'bg-gray-50 text-gray-600 border-gray-200 cursor-default focus:ring-0'
-              : 'focus:ring-2 focus:ring-[#c2002f] focus:border-[#c2002f]'} 
+              : 'focus:ring-2 focus:ring-[#c2002f] focus:border-[#c2002f]'}
             ${className}`}
           {...(props as React.InputHTMLAttributes<HTMLInputElement>)}
         />

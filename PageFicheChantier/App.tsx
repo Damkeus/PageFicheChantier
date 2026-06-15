@@ -3,10 +3,13 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { IInputs } from "./generated/ManifestTypes";
 import './css/input.css';
 
-import { NAV_ITEMS, ProjectData, StepId, AppMode, mapSharePointDataToProjectData, mapProjectDataToSharePointData, AccessoryOption, CableOption, MonteurOption, RawProjectData, INITIAL_DATA, SchemaElement } from './types';
-import { generateOrdreSchema } from './schemaConstants';
+import { NAV_ITEMS, ProjectData, StepId, AppMode, mapSharePointDataToProjectData, mapProjectDataToSharePointData, AccessoryOption, CableOption, MonteurOption, RawProjectData, INITIAL_DATA, SchemaLiaison } from './types';
+import { generateOrdreSchema, parseCurrentSchema, serializeCurrentSchema } from './schemaConstants';
 import { Input, Select, TextArea, CableSelect, AccessoryList, BooleanCheckbox, MultiSelectCheckbox } from './components/Input';
 import { SchemaEditor } from './components/SchemaEditor';
+import { WaitState } from './components/WaitState';
+import { ConfidenceLegend } from './components/ConfidenceLegend';
+import { ConfidenceContext, buildConfidenceMap, isAwaitingAi } from './confidence';
 import { Check, Upload, FileText, Calendar, ArrowRight, ArrowLeft, MessageSquare, X, Users, PenTool, DownloadCloud, AlertCircle, Eye, ClipboardEdit, Database, Cable, PenLine, Loader2, Monitor } from 'lucide-react';
 
 
@@ -34,15 +37,19 @@ const ACCESSORY_OPTIONS = [
 export interface IAppProps {
   pcfContext?: ComponentFramework.Context<IInputs>;
   projectDataJson?: string;
+  currentSchemaJson?: string;
   accessoriesOptionsJson?: string;
   cablesOptionsJson?: string;
   monteursOptionsJson?: string;
+  /** JSON allégé (labels + tables) extrait du CCTP par AI Builder. */
+  cctpJson?: string;
   onDataChange?: (newDataJson: string) => void;
+  onSchemaChange?: (schemaJson: string) => void;
   onNavigate?: (target: string) => void;
 }
 
 export default function App(props: IAppProps) {
-  const { pcfContext, projectDataJson, accessoriesOptionsJson, cablesOptionsJson, monteursOptionsJson, onDataChange, onNavigate } = props;
+  const { pcfContext, projectDataJson, currentSchemaJson, accessoriesOptionsJson, cablesOptionsJson, monteursOptionsJson, cctpJson, onDataChange, onSchemaChange, onNavigate } = props;
 
   // Parse options helper
   const parseOptionsOriginal = <T,>(json: string | undefined): T[] => {
@@ -151,9 +158,27 @@ export default function App(props: IAppProps) {
     return INITIAL_DATA;
   };
 
+  // Parse initial liaisons from currentSchema (with legacy schemaData/ordreSchema fallback)
+  const getInitialLiaisons = (): SchemaLiaison[] => {
+    const initial = getInitialData();
+    return parseCurrentSchema(currentSchemaJson || "", {
+      schemaData: initial.schemaData,
+      ordreSchema: initial.ordreSchema,
+    });
+  };
+
   const [appMode, setAppMode] = useState<AppMode>('landing');
   const [activeStep, setActiveStep] = useState<StepId>('general');
   const [data, setData] = useState<ProjectData>(getInitialData);
+  const [liaisons, setLiaisons] = useState<SchemaLiaison[]>(getInitialLiaisons);
+
+  // Sync incoming currentSchema changes from Power Apps
+  useEffect(() => {
+    const parsed = parseCurrentSchema(currentSchemaJson || "");
+    if (parsed.length > 0) {
+      setLiaisons(parsed);
+    }
+  }, [currentSchemaJson]);
 
   // Detect container width for mobile guard
   const rootRef = useRef<HTMLDivElement>(null);
@@ -205,9 +230,17 @@ export default function App(props: IAppProps) {
   // QHSE Navigation Modal State
   const [isQHSEModalOpen, setIsQHSEModalOpen] = useState(false);
 
+  // Bypass de l'écran d'attente IA : l'utilisateur choisit de saisir
+  // manuellement sans attendre le traitement du CCTP ("Je commence sans CCTP").
+  const [skipWait, setSkipWait] = useState(false);
+
   // Le auto-broadcast a été supprimé pour éviter l'appel abusif à OnChange et les erreurs de timing.
 
   const isViewMode = appMode === 'view';
+
+  // Table de confiance AI Builder (vert/orange/rouge), recalculée à chaque
+  // nouveau JSON. Diffusée aux Input via ConfidenceContext.
+  const confidenceMap = React.useMemo(() => buildConfidenceMap(cctpJson), [cctpJson]);
 
   const handleInputChange = (field: keyof ProjectData, value: any) => {
     if (isViewMode) return; // Prevent edits in view mode
@@ -918,12 +951,21 @@ export default function App(props: IAppProps) {
     }
   };
 
-  // Handle Schema Save
-  const handleSchemaSave = (elements: SchemaElement[]) => {
-    const ordreSchema = generateOrdreSchema(elements);
-    const schemaData = JSON.stringify(elements);
-    const newData = { ...data, schemaData, ordreSchema };
+  // Handle Schema Save — persists the multi-liaison JSON via currentSchema output,
+  // and keeps the legacy single-schema fields in sync (first liaison) for compat.
+  const handleSchemaSave = (savedLiaisons: SchemaLiaison[]) => {
+    setLiaisons(savedLiaisons);
 
+    // Emit the multi-liaison JSON envelope (read later by other PCFs)
+    if (onSchemaChange) {
+      onSchemaChange(serializeCurrentSchema(savedLiaisons));
+    }
+
+    // Legacy backward-compat: mirror the first liaison into schemaData/ordreSchema
+    const firstElements = savedLiaisons[0]?.elements ?? [];
+    const ordreSchema = generateOrdreSchema(firstElements);
+    const schemaData = JSON.stringify(firstElements);
+    const newData = { ...data, schemaData, ordreSchema };
     setData(newData);
 
     if (onDataChange) {
@@ -937,8 +979,14 @@ export default function App(props: IAppProps) {
     }
   };
 
+  // Wait-state : le flux AI Builder (~1 min) n'a pas encore produit le JSON.
+  // On affiche l'écran "café ☕" tant qu'aucune donnée exploitable n'est reçue.
+  if (isAwaitingAi(cctpJson) && !skipWait) {
+    return <WaitState onSkip={() => setSkipWait(true)} />;
+  }
+
   if (appMode === 'schema') {
-    return <SchemaEditor onBack={() => setAppMode('landing')} onSave={handleSchemaSave} />;
+    return <SchemaEditor initialLiaisons={liaisons} onBack={() => setAppMode('landing')} onSave={handleSchemaSave} />;
   }
 
   // Mobile guard — screen too small
@@ -1024,7 +1072,9 @@ export default function App(props: IAppProps) {
 
   // Main App Interface
   return (
-    <div ref={rootRef} className="flex flex-col w-full h-full bg-gray-100 overflow-hidden font-sans">
+    <div ref={rootRef} className="relative flex flex-col w-full h-full bg-gray-100 overflow-hidden font-sans">
+      {/* Légende des couleurs de confiance — onglet Général uniquement */}
+      {activeStep === 'general' && <ConfidenceLegend />}
       {/* Top Header */}
       <header className="h-16 bg-white border-b border-gray-200 flex items-center justify-between px-6 shadow-sm z-30 flex-shrink-0">
         <div className="flex items-center gap-3 overflow-hidden">
@@ -1077,7 +1127,9 @@ export default function App(props: IAppProps) {
             </div>
 
             <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
-              {renderStepContent()}
+              <ConfidenceContext.Provider value={confidenceMap}>
+                {renderStepContent()}
+              </ConfidenceContext.Provider>
             </div>
 
             {/* Navigation Footer */}
