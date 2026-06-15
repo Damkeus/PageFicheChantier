@@ -111,15 +111,15 @@ et l'ajout dans `getOutputs()`. **Les outputs/callbacks existants restent inchan
 1. Ouverture (`AppMode 'tables'`) : `parseCctpTables(cctpJson)` → données IA par
    section (lecture seule + confiance).
 2. Mode **IA Builder** : affichage lecture seule + pastilles.
-3. Mode **Saisie main** : grille éditable. Amorçage = valeur SP existante (si la
-   colonne a déjà été patchée et est passée en entrée — voir note ci-dessous),
-   sinon copie des lignes IA. Édition / ajout / suppression.
+3. Mode **Saisie main** : grille éditable. **Amorçage MVP = copie des lignes IA**
+   de la section (ou 1 ligne blanche si l'IA n'a rien extrait). Édition / ajout /
+   suppression.
 4. **Enregistrer** : pour chaque section modifiée, sérialise → `onTablesChange`
    → output dédié → Power Apps Patch la colonne SP correspondante.
 
-Note : si l'on veut amorcer « Saisie main » depuis la dernière valeur SP, il faut
-que Power Apps repasse ces colonnes en entrée. Hors scope MVP : par défaut on
-amorce depuis l'IA. (Point à confirmer si une relecture SP est souhaitée.)
+Note (hors scope MVP) : amorcer « Saisie main » depuis la **dernière valeur SP**
+nécessiterait que Power Apps repasse ces colonnes en entrée (4 nouvelles props
+`input`). Non retenu en MVP — à rouvrir si une relecture SP est souhaitée.
 
 ## Composants & isolation
 
