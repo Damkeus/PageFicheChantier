@@ -8,6 +8,7 @@ import {
   parseCctpTables,
   serializeSection,
   emptyRow,
+  seedRows,
 } from '../tables';
 
 interface TablesEditorProps {
@@ -38,7 +39,7 @@ export function TablesEditor({ cctpJson, onSaveSection, onBack }: TablesEditorPr
   const [edited, setEdited] = useState<EditState>(() => {
     const state = {} as EditState;
     for (const s of SECTION_DEFS) {
-      state[s.id] = parsed[s.id].grids.map((g) => g.rows.map((r) => ({ ...r })));
+      state[s.id] = parsed[s.id].grids.map((g) => seedRows(g));
     }
     return state;
   });
@@ -58,20 +59,24 @@ export function TablesEditor({ cctpJson, onSaveSection, onBack }: TablesEditorPr
 
   const addRow = (gridIdx: number) => {
     setSaved(false);
-    setEdited((prev) => {
-      const next: EditState = { ...prev, [activeId]: prev[activeId].map((g) => g.map((r) => ({ ...r }))) };
-      next[activeId][gridIdx].push(emptyRow(activeSection.grids[gridIdx].columns));
-      return next;
-    });
+    setEdited((prev) => ({
+      ...prev,
+      [activeId]: prev[activeId].map((g, gi) =>
+        gi === gridIdx
+          ? [...g.map((r) => ({ ...r })), emptyRow(activeSection.grids[gridIdx].columns)]
+          : g.map((r) => ({ ...r }))
+      ),
+    }));
   };
 
   const removeRow = (gridIdx: number, rowIdx: number) => {
     setSaved(false);
-    setEdited((prev) => {
-      const next: EditState = { ...prev, [activeId]: prev[activeId].map((g) => g.map((r) => ({ ...r }))) };
-      next[activeId][gridIdx].splice(rowIdx, 1);
-      return next;
-    });
+    setEdited((prev) => ({
+      ...prev,
+      [activeId]: prev[activeId].map((g, gi) =>
+        gi === gridIdx ? g.filter((_, ri) => ri !== rowIdx) : g.map((r) => ({ ...r }))
+      ),
+    }));
   };
 
   const handleSave = () => {

@@ -154,3 +154,14 @@ export function emptyRow(columns: string[]): GridRow {
   for (const c of columns) r[c] = '';
   return r;
 }
+
+/**
+ * Lignes éditables d'amorçage pour une grille : copie des lignes IA, ou UNE
+ * ligne blanche si l'IA n'a rien extrait (cf. spec « 1 ligne blanche si l'IA
+ * n'a rien extrait »).
+ */
+export function seedRows(grid: ParsedGrid): GridRow[] {
+  return grid.rows.length > 0
+    ? grid.rows.map((r) => ({ ...r }))
+    : [emptyRow(grid.columns)];
+}

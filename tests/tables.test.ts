@@ -63,3 +63,19 @@ describe('serializeSection / emptyRow', () => {
     expect(emptyRow(['A', 'B'])).toEqual({ A: '', B: '' });
   });
 });
+
+import { seedRows } from '../PageFicheChantier/tables';
+
+describe('seedRows', () => {
+  it('copie les lignes IA quand il y en a', () => {
+    const grid = { key: 'k', columns: ['A', 'B'], rows: [{ A: 'x', B: 'y' }], levels: [] };
+    const seeded = seedRows(grid);
+    expect(seeded).toEqual([{ A: 'x', B: 'y' }]);
+    expect(seeded[0]).not.toBe(grid.rows[0]); // copie, pas la même référence
+  });
+
+  it('amorce une ligne blanche quand l’IA n’a rien extrait', () => {
+    const grid = { key: 'k', columns: ['A', 'B'], rows: [], levels: [] };
+    expect(seedRows(grid)).toEqual([{ A: '', B: '' }]);
+  });
+});
