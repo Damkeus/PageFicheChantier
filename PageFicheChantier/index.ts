@@ -9,7 +9,6 @@ export class PageFicheChantier implements ComponentFramework.StandardControl<IIn
 
     // Output values — initialized to ""
     private _latestChange = "";
-    private _navigationRequest = "";
     private _schemaChange = "";
     // Outputs tableaux CCTP — un JSON par section (clé = nom de la propriété output)
     private _cctpTables: Record<string, string> = {};
@@ -43,18 +42,11 @@ export class PageFicheChantier implements ComponentFramework.StandardControl<IIn
             monteursOptionsJson: context.parameters.monteursOptions?.raw || "",
             cctpJson: context.parameters.Input_CCTPJson?.raw || "",
             onDataChange: (newDataJson: string) => {
-                console.log("[PCF index.ts] onDataChange called, JSON length:", newDataJson.length);
                 this._latestChange = newDataJson;
                 this._notifyOutputChanged();
-                console.log("[PCF index.ts] notifyOutputChanged() called successfully");
             },
             onSchemaChange: (schemaJson: string) => {
-                console.log("[PCF index.ts] onSchemaChange called, JSON length:", schemaJson.length);
                 this._schemaChange = schemaJson;
-                this._notifyOutputChanged();
-            },
-            onNavigate: (target: string) => {
-                this._navigationRequest = target;
                 this._notifyOutputChanged();
             },
             onTablesChange: (outputKey: string, json: string) => {
@@ -70,10 +62,8 @@ export class PageFicheChantier implements ComponentFramework.StandardControl<IIn
     }
 
     public getOutputs(): IOutputs {
-        console.log("[PCF index.ts] getOutputs() called, latestChange length:", this._latestChange?.length);
         return {
             latestChange: this._latestChange,
-            navigationRequest: this._navigationRequest,
             schemaChange: this._schemaChange,
             cctpInterlocuteursExternes: this._cctpTables.cctpInterlocuteursExternes ?? "",
             cctpInterlocuteursClient: this._cctpTables.cctpInterlocuteursClient ?? "",

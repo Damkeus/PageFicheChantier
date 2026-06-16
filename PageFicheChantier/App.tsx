@@ -47,13 +47,12 @@ export interface IAppProps {
   cctpJson?: string;
   onDataChange?: (newDataJson: string) => void;
   onSchemaChange?: (schemaJson: string) => void;
-  onNavigate?: (target: string) => void;
   /** Émet le JSON d'une section de tableaux CCTP vers son output dédié. */
   onTablesChange?: (outputKey: string, json: string) => void;
 }
 
 export default function App(props: IAppProps) {
-  const { pcfContext, projectDataJson, currentSchemaJson, accessoriesOptionsJson, cablesOptionsJson, monteursOptionsJson, cctpJson, onDataChange, onSchemaChange, onNavigate, onTablesChange } = props;
+  const { pcfContext, projectDataJson, currentSchemaJson, accessoriesOptionsJson, cablesOptionsJson, monteursOptionsJson, cctpJson, onDataChange, onSchemaChange, onTablesChange } = props;
 
   // Parse options helper
   const parseOptionsOriginal = <T,>(json: string | undefined): T[] => {
@@ -110,8 +109,6 @@ export default function App(props: IAppProps) {
     if (accessoriesOptionsJson) {
       // 🟢 Store Full Objects
       const parsed = parseOptionsOriginal<AccessoryOption>(accessoriesOptionsJson);
-      console.log("Parsed Accessories (First 3):", parsed.slice(0, 3));
-      console.log("Accessories have ID?", parsed.some(p => p.ID !== undefined || p.Id !== undefined));
       setFullAccessoriesList(parsed);
       // Map for UI
       setAccessoriesList(parsed.map(accessoryMapper).filter(Boolean));
@@ -122,8 +119,6 @@ export default function App(props: IAppProps) {
     if (cablesOptionsJson) {
       // 🟢 Store Full Objects
       const parsed = parseOptionsOriginal<CableOption>(cablesOptionsJson);
-      console.log("Parsed Cables (First 3):", parsed.slice(0, 3));
-      console.log("Cables have ID?", parsed.some(p => p.ID !== undefined || p.Id !== undefined));
       setFullCablesList(parsed);
       // Map for UI
       setCablesList(parsed.map(cableMapper).filter(Boolean));
@@ -297,7 +292,6 @@ export default function App(props: IAppProps) {
       // Timestamp to force Power Apps to detect change
       fullData._triggerTime = Date.now();
 
-      console.log("[App] Save → onDataChange:", fullData);
       if (onDataChange) {
         onDataChange(JSON.stringify(fullData));
       }
@@ -1057,12 +1051,12 @@ export default function App(props: IAppProps) {
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-white rounded-full blur-[100px]"></div>
         </div>
 
-        <div className="relative w-full max-w-5xl mx-auto text-center">
+        <div className="relative w-full max-w-3xl mx-auto text-center">
           <h1 className="text-2xl font-bold text-white mb-6 tracking-tight">
             Nexans <span className="font-light opacity-90">Project Manager</span>
           </h1>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full">
             <button
               onClick={() => {
                 setAppMode('view');
