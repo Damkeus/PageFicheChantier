@@ -11,7 +11,7 @@ export type StepId =
     | 'pgc'
     | 'resume';
 
-export type AppMode = 'landing' | 'view' | 'edit' | 'schema';
+export type AppMode = 'landing' | 'view' | 'edit' | 'schema' | 'tables';
 
 export interface SchemaElement {
     id: string;

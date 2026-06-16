@@ -11,6 +11,8 @@ export class PageFicheChantier implements ComponentFramework.StandardControl<IIn
     private _latestChange = "";
     private _navigationRequest = "";
     private _schemaChange = "";
+    // Outputs tableaux CCTP — un JSON par section (clé = nom de la propriété output)
+    private _cctpTables: Record<string, string> = {};
 
     constructor() {
         // Empty
@@ -54,7 +56,11 @@ export class PageFicheChantier implements ComponentFramework.StandardControl<IIn
             onNavigate: (target: string) => {
                 this._navigationRequest = target;
                 this._notifyOutputChanged();
-            }
+            },
+            onTablesChange: (outputKey: string, json: string) => {
+                this._cctpTables[outputKey] = json;
+                this._notifyOutputChanged();
+            },
         };
 
         ReactDOM.render(
@@ -69,6 +75,10 @@ export class PageFicheChantier implements ComponentFramework.StandardControl<IIn
             latestChange: this._latestChange,
             navigationRequest: this._navigationRequest,
             schemaChange: this._schemaChange,
+            cctpInterlocuteursExternes: this._cctpTables.cctpInterlocuteursExternes ?? "",
+            cctpInterlocuteursClient: this._cctpTables.cctpInterlocuteursClient ?? "",
+            cctpRedactionIndice: this._cctpTables.cctpRedactionIndice ?? "",
+            cctpCaracteristiquesSps: this._cctpTables.cctpCaracteristiquesSps ?? "",
         };
     }
 

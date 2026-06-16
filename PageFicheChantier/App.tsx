@@ -7,11 +7,12 @@ import { NAV_ITEMS, ProjectData, StepId, AppMode, mapSharePointDataToProjectData
 import { generateOrdreSchema, parseCurrentSchema, serializeCurrentSchema } from './schemaConstants';
 import { Input, Select, TextArea, CableSelect, AccessoryList, BooleanCheckbox, MultiSelectCheckbox } from './components/Input';
 import { SchemaEditor } from './components/SchemaEditor';
+import { TablesEditor } from './components/TablesEditor';
 import { WaitState } from './components/WaitState';
 import { ConfidenceLegend } from './components/ConfidenceLegend';
 import { FieldLevelContext, isAwaitingAi, isBlankValue, ConfidenceLevel } from './confidence';
 import { mergeCctpIntoData, AI_FIELD_KEYS } from './merge';
-import { Check, Upload, FileText, Calendar, ArrowRight, ArrowLeft, MessageSquare, X, Users, PenTool, DownloadCloud, AlertCircle, Eye, ClipboardEdit, Database, Cable, PenLine, Loader2, Monitor } from 'lucide-react';
+import { Check, Upload, FileText, Calendar, ArrowRight, ArrowLeft, MessageSquare, X, Users, PenTool, DownloadCloud, AlertCircle, Eye, ClipboardEdit, Database, Cable, PenLine, Loader2, Monitor, Table2 } from 'lucide-react';
 
 
 const CABLE_OPTIONS = [
@@ -47,10 +48,12 @@ export interface IAppProps {
   onDataChange?: (newDataJson: string) => void;
   onSchemaChange?: (schemaJson: string) => void;
   onNavigate?: (target: string) => void;
+  /** Émet le JSON d'une section de tableaux CCTP vers son output dédié. */
+  onTablesChange?: (outputKey: string, json: string) => void;
 }
 
 export default function App(props: IAppProps) {
-  const { pcfContext, projectDataJson, currentSchemaJson, accessoriesOptionsJson, cablesOptionsJson, monteursOptionsJson, cctpJson, onDataChange, onSchemaChange, onNavigate } = props;
+  const { pcfContext, projectDataJson, currentSchemaJson, accessoriesOptionsJson, cablesOptionsJson, monteursOptionsJson, cctpJson, onDataChange, onSchemaChange, onNavigate, onTablesChange } = props;
 
   // Parse options helper
   const parseOptionsOriginal = <T,>(json: string | undefined): T[] => {
@@ -1019,6 +1022,16 @@ export default function App(props: IAppProps) {
     return <SchemaEditor initialLiaisons={liaisons} onBack={() => setAppMode('landing')} onSave={handleSchemaSave} />;
   }
 
+  if (appMode === 'tables') {
+    return (
+      <TablesEditor
+        cctpJson={cctpJson}
+        onSaveSection={(outputKey, json) => onTablesChange?.(outputKey, json)}
+        onBack={() => setAppMode('landing')}
+      />
+    );
+  }
+
   // Mobile guard — screen too small
   if (isMobilePortrait) {
     return (
@@ -1044,12 +1057,12 @@ export default function App(props: IAppProps) {
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-white rounded-full blur-[100px]"></div>
         </div>
 
-        <div className="relative w-full max-w-3xl mx-auto text-center">
+        <div className="relative w-full max-w-5xl mx-auto text-center">
           <h1 className="text-2xl font-bold text-white mb-6 tracking-tight">
             Nexans <span className="font-light opacity-90">Project Manager</span>
           </h1>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
             <button
               onClick={() => {
                 setAppMode('view');
@@ -1092,6 +1105,20 @@ export default function App(props: IAppProps) {
               <div>
                 <h2 className="font-bold text-gray-900" style={{ fontSize: '14px', marginBottom: '6px' }}>Créer un Schéma</h2>
                 <p className="text-gray-500 leading-relaxed" style={{ fontSize: '11px' }}>Schéma unifilaire par glisser-déposer.</p>
+              </div>
+            </button>
+
+            <button
+              onClick={() => setAppMode('tables')}
+              className="group bg-white/95 backdrop-blur-sm rounded-2xl shadow-2xl hover:scale-105 transition-all duration-300 flex flex-col items-center justify-center text-center border border-white/20 hover:border-white/50"
+              style={{ padding: '20px 12px', minHeight: '160px' }}
+            >
+              <div className="bg-red-50 rounded-xl flex items-center justify-center group-hover:bg-[#A30026] group-hover:text-white transition-colors duration-300 shadow-inner" style={{ width: '52px', height: '52px', marginBottom: '12px' }}>
+                <Table2 className="text-[#A30026] group-hover:text-white" style={{ width: '26px', height: '26px' }} />
+              </div>
+              <div>
+                <h2 className="font-bold text-gray-900" style={{ fontSize: '14px', marginBottom: '6px' }}>Tableaux CCTP</h2>
+                <p className="text-gray-500 leading-relaxed" style={{ fontSize: '11px' }}>Vérifier et corriger les tableaux extraits du CCTP.</p>
               </div>
             </button>
           </div>
