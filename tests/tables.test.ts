@@ -49,3 +49,17 @@ describe('parseCctpTables', () => {
     expect(res.sps.grids[0].columns).toEqual(['Libellé', 'Contact']);
   });
 });
+
+import { serializeSection, emptyRow } from '../PageFicheChantier/tables';
+
+describe('serializeSection / emptyRow', () => {
+  it('sérialise columns + rows sous { grids: [...] }', () => {
+    const rows = [{ Nom: 'X', Mail: '', 'N° Téléphone': '', Fonction: 'Y' }];
+    const json = serializeSection([{ key: 'externes', columns: ['Nom', 'Mail', 'N° Téléphone', 'Fonction'], rows }]);
+    expect(JSON.parse(json)).toEqual({ grids: [{ key: 'externes', columns: ['Nom', 'Mail', 'N° Téléphone', 'Fonction'], rows }] });
+  });
+
+  it('emptyRow crée une ligne aux colonnes vides', () => {
+    expect(emptyRow(['A', 'B'])).toEqual({ A: '', B: '' });
+  });
+});

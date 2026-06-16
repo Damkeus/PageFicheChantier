@@ -134,3 +134,23 @@ export function parseCctpTables(cctpJson: string | undefined | null): Record<Sec
   }
   return out;
 }
+
+export interface SerializedGrid {
+  key: string;
+  columns: string[];
+  rows: GridRow[];
+}
+
+export interface SerializedSection {
+  grids: SerializedGrid[];
+}
+
+export function serializeSection(grids: SerializedGrid[]): string {
+  return JSON.stringify({ grids } as SerializedSection);
+}
+
+export function emptyRow(columns: string[]): GridRow {
+  const r: GridRow = {};
+  for (const c of columns) r[c] = '';
+  return r;
+}
