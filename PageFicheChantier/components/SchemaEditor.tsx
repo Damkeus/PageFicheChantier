@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Download, ArrowLeft, Trash2, HelpCircle, X, Move, Plus, Tag } from 'lucide-react';
 import { SchemaElement, SchemaTool, SchemaLiaison } from '../types';
 import { generateOrdreSchema, generateLiaisonId } from '../schemaConstants';
+import { Toast } from './Toast';
 
 // Import Base64 Assets from assets.ts
 import {
@@ -59,6 +60,12 @@ export const SchemaEditor: React.FC<SchemaEditorProps> = ({ initialLiaisons, onB
 
     // UI State
     const [showHelp, setShowHelp] = useState(true);
+    const [showToast, setShowToast] = useState(false);
+
+    const handleSaveClick = () => {
+        onSave(liaisons);
+        setShowToast(true);
+    };
 
     // Tool drag-and-drop creation state
     const [draggingTool, setDraggingTool] = useState<SchemaTool | null>(null);
@@ -344,6 +351,8 @@ export const SchemaEditor: React.FC<SchemaEditorProps> = ({ initialLiaisons, onB
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
         >
+            <Toast message="Schéma enregistré" show={showToast} onHide={() => setShowToast(false)} />
+
             {/* Left Sidebar Toolbar */}
             <div className="w-28 bg-white border-r border-gray-200 flex flex-col shadow-lg z-50">
                 {/* Header */}
@@ -421,7 +430,7 @@ export const SchemaEditor: React.FC<SchemaEditorProps> = ({ initialLiaisons, onB
                     </button>
 
                     <button
-                        onClick={() => onSave(liaisons)}
+                        onClick={handleSaveClick}
                         className="w-full p-3 bg-[#A30026] text-white rounded-xl shadow-lg hover:bg-[#8a0020] active:scale-95 transition-all flex items-center justify-center gap-2 font-bold"
                     >
                         <Download className="w-4 h-4" />

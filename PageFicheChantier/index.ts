@@ -69,6 +69,7 @@ export class PageFicheChantier implements ComponentFramework.StandardControl<IIn
             cctpInterlocuteursClient: this._cctpTables.cctpInterlocuteursClient ?? "",
             cctpRedactionIndice: this._cctpTables.cctpRedactionIndice ?? "",
             cctpCaracteristiquesSps: this._cctpTables.cctpCaracteristiquesSps ?? "",
+            cctpSousTraitants: this._cctpTables.cctpSousTraitants ?? "",
         };
     }
 

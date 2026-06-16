@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { X, Save, Sparkles, PenLine, Plus, Trash2 } from 'lucide-react';
 import { CONFIDENCE_COLORS, ConfidenceLevel } from '../confidence';
+import { Toast } from './Toast';
 import {
   SECTION_DEFS,
   SectionId,
@@ -34,6 +35,7 @@ export function TablesEditor({ cctpJson, onSaveSection, onBack }: TablesEditorPr
     return m;
   });
   const [saved, setSaved] = useState(false);
+  const [showToast, setShowToast] = useState(false);
 
   // Amorçage Saisie main = copie profonde des lignes IA.
   const [edited, setEdited] = useState<EditState>(() => {
@@ -85,10 +87,12 @@ export function TablesEditor({ cctpJson, onSaveSection, onBack }: TablesEditorPr
       onSaveSection(s.outputKey, serializeSection(grids));
     }
     setSaved(true);
+    setShowToast(true);
   };
 
   return (
     <div className="absolute inset-0 flex flex-col bg-gray-50">
+      <Toast message="Tableaux CCTP enregistrés" show={showToast} onHide={() => setShowToast(false)} />
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 bg-white border-b border-gray-200 shadow-sm">
         <div className="flex items-center gap-3">

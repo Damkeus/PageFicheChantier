@@ -50,6 +50,7 @@
     <property name="cctpInterlocuteursClient" display-name-key="CCTP_Interlocuteurs_Client" description-key="JSON tableau interlocuteurs client (édité)" of-type="SingleLine.TextArea" usage="output" required="false" />
     <property name="cctpRedactionIndice" display-name-key="CCTP_Redaction_Indice" description-key="JSON tableaux rédaction et indices (édité)" of-type="SingleLine.TextArea" usage="output" required="false" />
     <property name="cctpCaracteristiquesSps" display-name-key="CCTP_Caracteristiques_SPS" description-key="JSON tableau coordonateur SPS (édité)" of-type="SingleLine.TextArea" usage="output" required="false" />
+    <property name="cctpSousTraitants" display-name-key="CCTP_Sous_Traitants" description-key="JSON tableau sous-traitants (édité)" of-type="SingleLine.TextArea" usage="output" required="false" />
     <property name="accessoriesOptions" display-name-key="Accessories List JSON" description-key="JSON list of accessories" of-type="SingleLine.Text" usage="input" required="false" />
     <property name="cablesOptions" display-name-key="Cables List JSON" description-key="JSON list of cables" of-type="SingleLine.Text" usage="input" required="false" />
     <property name="monteursOptions" display-name-key="Monteurs List JSON" description-key="JSON list of monteurs" of-type="SingleLine.Text" usage="input" required="false" />

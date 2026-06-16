@@ -1,6 +1,6 @@
 import { ConfidenceLevel, confidenceLevel, normalizeFieldName } from './confidence';
 
-export type SectionId = 'externes' | 'client' | 'redaction' | 'sps';
+export type SectionId = 'externes' | 'client' | 'redaction' | 'sps' | 'soustraitants';
 
 export interface GridDef {
   key: string;
@@ -43,6 +43,12 @@ export const SECTION_DEFS: SectionDef[] = [
     label: 'Caractéristiques & SPS',
     outputKey: 'cctpCaracteristiquesSps',
     grids: [{ key: 'sps', aiTableNames: ['Coordonateur SPS / Prestataire Sécurité'], columns: ['Libellé', 'Contact'] }],
+  },
+  {
+    id: 'soustraitants',
+    label: 'Sous-traitants',
+    outputKey: 'cctpSousTraitants',
+    grids: [{ key: 'soustraitants', aiTableNames: ['Sous-traitants', 'Sous-traitant', 'Sous Traitants'], columns: ['Entreprise', 'Nom', 'Mail', 'N° Téléphone', 'Prestation'] }],
   },
 ];
 
