@@ -181,6 +181,32 @@ export function lookupConfidence(
   return undefined;
 }
 
+/**
+ * Valeurs "sentinelles" SharePoint à traiter comme VIDES pour la règle d'or
+ * (cf. réponse métier : « texte non vide + ignorer le sentinel »). Couvre le
+ * titre placeholder d'INITIAL_DATA et le budget "0" par défaut.
+ */
+const SENTINEL_VALUES = new Set<string>([
+  "Donnée test : vous n'avez pas correctement chargé votre Projet",
+]);
+
+/**
+ * Une valeur SharePoint est-elle "vide" au sens de la fusion ? Vrai si null,
+ * undefined, chaîne vide/espaces, ou valeur sentinelle. Le budget "0" est
+ * traité comme vide (placeholder par défaut), pas les autres "0".
+ */
+export function isBlankValue(value: unknown, opts?: { zeroIsBlank?: boolean }): boolean {
+  if (value === null || value === undefined) return true;
+  let s: string;
+  if (typeof value === 'string') s = value.trim();
+  else if (typeof value === 'number' || typeof value === 'boolean') s = String(value).trim();
+  else return false; // objet/tableau non null → considéré comme renseigné
+  if (s === '') return true;
+  if (SENTINEL_VALUES.has(s)) return true;
+  if (opts?.zeroIsBlank && s === '0') return true;
+  return false;
+}
+
 /** Indique si la fiche est encore en attente de l'IA (JSON vide/null). */
 export function isAwaitingAi(json: string | undefined | null): boolean {
   if (json === undefined || json === null) return true;
@@ -318,6 +344,22 @@ const ALIAS_INDEX: Map<string, string[]> = (() => {
 
 // ── Contexte React : diffuse la table de confiance à tous les Input ──
 export const ConfidenceContext = React.createContext<Map<string, FieldConfidence>>(new Map());
+
+/**
+ * Contexte des NIVEAUX explicites par champ, calculés au moment de la fusion
+ * (cf. merge.ts). Indexé par `normalizeFieldName(label du formulaire)`. C'est
+ * la source de vérité de la couleur : SharePoint rempli → 'green' forcé, champ
+ * IA → couleur de confiance, champ non mappé → absent (l'Input retombe sur une
+ * logique neutre basée sur la présence de valeur).
+ */
+export const FieldLevelContext = React.createContext<Map<string, ConfidenceLevel>>(new Map());
+
+/** Récupère le niveau explicite d'un champ via son libellé (ou undefined). */
+export function useFieldLevel(label: string | undefined): ConfidenceLevel | undefined {
+  const map = React.useContext(FieldLevelContext);
+  if (!label) return undefined;
+  return map.get(normalizeFieldName(label));
+}
 
 /**
  * Résout la confiance d'un champ : appariement direct sur le libellé, puis via

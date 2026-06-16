@@ -9,7 +9,8 @@ import { Input, Select, TextArea, CableSelect, AccessoryList, BooleanCheckbox, M
 import { SchemaEditor } from './components/SchemaEditor';
 import { WaitState } from './components/WaitState';
 import { ConfidenceLegend } from './components/ConfidenceLegend';
-import { ConfidenceContext, buildConfidenceMap, isAwaitingAi } from './confidence';
+import { FieldLevelContext, isAwaitingAi, isBlankValue, ConfidenceLevel } from './confidence';
+import { mergeCctpIntoData, AI_FIELD_KEYS } from './merge';
 import { Check, Upload, FileText, Calendar, ArrowRight, ArrowLeft, MessageSquare, X, Users, PenTool, DownloadCloud, AlertCircle, Eye, ClipboardEdit, Database, Cable, PenLine, Loader2, Monitor } from 'lucide-react';
 
 
@@ -169,7 +170,12 @@ export default function App(props: IAppProps) {
 
   const [appMode, setAppMode] = useState<AppMode>('landing');
   const [activeStep, setActiveStep] = useState<StepId>('general');
-  const [data, setData] = useState<ProjectData>(getInitialData);
+  // État initial = fusion SharePoint ⊕ CCTP (IA). Les niveaux de couleur par
+  // champ sont calculés en même temps (cf. merge.ts).
+  const [data, setData] = useState<ProjectData>(() => mergeCctpIntoData(getInitialData(), cctpJson).data);
+  const [fieldLevels, setFieldLevels] = useState<Map<string, ConfidenceLevel>>(
+    () => mergeCctpIntoData(getInitialData(), cctpJson).levels
+  );
   const [liaisons, setLiaisons] = useState<SchemaLiaison[]>(getInitialLiaisons);
 
   // Sync incoming currentSchema changes from Power Apps
@@ -196,29 +202,48 @@ export default function App(props: IAppProps) {
   const [rawSharePointData, setRawSharePointData] = useState<any>(null);
 
   // 🟢 FIX: Sync incoming data changes from PowerApps (e.g. Gallery selection change)
+  // + fusion CCTP (IA). La règle d'or s'applique ici : SharePoint prime, l'IA ne
+  // remplit que les champs vides. Se redéclenche quand le projet change OU quand
+  // le JSON IA arrive après coup (~1 min de traitement).
   useEffect(() => {
-    if (projectDataJson) {
-      try {
-        const rawData = JSON.parse(projectDataJson);
+    if (!projectDataJson) return;
+    try {
+      const rawData = JSON.parse(projectDataJson);
 
-        // Save the raw unmapped payload so we don't lose any unused columns on 'Save'
-        setRawSharePointData(Array.isArray(rawData) ? rawData[0] : rawData);
+      // Save the raw unmapped payload so we don't lose any unused columns on 'Save'
+      setRawSharePointData(Array.isArray(rawData) ? rawData[0] : rawData);
 
-        const newData = (rawData && (rawData.Title || rawData.Num_x00e9_roProjet))
-          ? mapSharePointDataToProjectData(rawData)
-          : { ...INITIAL_DATA, ...(rawData || {}) } as ProjectData;
+      const spData = (rawData && (rawData.Title || rawData.Num_x00e9_roProjet))
+        ? mapSharePointDataToProjectData(rawData)
+        : { ...INITIAL_DATA, ...(rawData || {}) } as ProjectData;
 
-        setData(prev => {
-          if (newData.id !== prev.id || (!prev.id && newData.id)) {
-            return newData;
+      const { data: merged, levels } = mergeCctpIntoData(spData, cctpJson);
+      setFieldLevels(levels);
+
+      setData(prev => {
+        // Nouveau projet → on prend la fusion complète.
+        if (merged.id !== prev.id || (!prev.id && merged.id)) {
+          return merged;
+        }
+        // Même projet (ex. CCTP arrivé après coup) → on ne remplit QUE les
+        // champs IA encore vides, sans écraser les saisies déjà présentes.
+        let changed = false;
+        const next: ProjectData = { ...prev };
+        for (const key of AI_FIELD_KEYS) {
+          if (
+            isBlankValue(prev[key], { zeroIsBlank: true }) &&
+            !isBlankValue(merged[key], { zeroIsBlank: true })
+          ) {
+            (next as unknown as Record<string, unknown>)[key as string] = merged[key];
+            changed = true;
           }
-          return prev;
-        });
-      } catch (e) {
-        console.error("Failed to parse incoming projectDataJson update", e);
-      }
+        }
+        return changed ? next : prev;
+      });
+    } catch (e) {
+      console.error("Failed to parse incoming projectDataJson update", e);
     }
-  }, [projectDataJson]);
+  }, [projectDataJson, cctpJson]);
 
   // Patch/Save state
   const [isSaving, setIsSaving] = useState(false);
@@ -234,10 +259,6 @@ export default function App(props: IAppProps) {
   // Le auto-broadcast a été supprimé pour éviter l'appel abusif à OnChange et les erreurs de timing.
 
   const isViewMode = appMode === 'view';
-
-  // Table de confiance AI Builder (vert/orange/rouge), recalculée à chaque
-  // nouveau JSON. Diffusée aux Input via ConfidenceContext.
-  const confidenceMap = React.useMemo(() => buildConfidenceMap(cctpJson), [cctpJson]);
 
   const handleInputChange = (field: keyof ProjectData, value: any) => {
     if (isViewMode) return; // Prevent edits in view mode
@@ -1136,9 +1157,9 @@ export default function App(props: IAppProps) {
             </div>
 
             <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
-              <ConfidenceContext.Provider value={confidenceMap}>
+              <FieldLevelContext.Provider value={fieldLevels}>
                 {renderStepContent()}
-              </ConfidenceContext.Provider>
+              </FieldLevelContext.Provider>
             </div>
 
             {/* Navigation Footer */}

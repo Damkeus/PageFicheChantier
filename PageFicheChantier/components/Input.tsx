@@ -2,8 +2,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Cable, Search, Check, ChevronDown, X } from 'lucide-react';
 import {
-  useFieldConfidence,
-  confidenceLevel,
+  useFieldLevel,
+  isBlankValue,
   CONFIDENCE_COLORS,
   CONFIDENCE_LABEL,
   ConfidenceLevel,
@@ -43,19 +43,22 @@ const ConfidenceBadge: React.FC<{ level: ConfidenceLevel }> = ({ level }) => {
 };
 
 export const Input: React.FC<InputProps> = ({ label, fullWidth = true, className = '', readOnly, isTextArea = false, rows = 3, confidence, noConfidence, onChange, ...props }) => {
-  const ctxConf = useFieldConfidence(noConfidence ? undefined : label);
+  // Niveau explicite calculé à la fusion (cf. merge.ts) : SharePoint→vert,
+  // champ IA→couleur de confiance. Absent ⇒ champ non mappé/neutre.
+  const explicitLevel = useFieldLevel(noConfidence ? undefined : label);
   const [touched, setTouched] = useState(false);
 
-  // Niveau effectif. Tous les champs sont couverts :
-  //  - modifié par l'humain → vert
-  //  - vide → neutre "Non renseigné" (jamais rouge, non obligatoire)
-  //  - score IA dispo → seuils vert/orange/rouge
-  //  - valeur présente sans score IA → vert
-  const isEmpty = props.value === undefined || props.value === null || String(props.value).trim() === '';
-  const score = confidence !== undefined ? confidence : ctxConf?.confidence;
+  // Niveau effectif, source de vérité unique de la couleur :
+  //  - modifié par l'humain        → vert (définitif)
+  //  - niveau explicite (fusion)   → SharePoint vert / IA confiance
+  //  - sinon, valeur présente      → vert (donnée SharePoint sécurisée)
+  //  - sinon (vide)                → neutre "Non renseigné"
+  const isEmpty = isBlankValue(props.value, { zeroIsBlank: false });
   let level: ConfidenceLevel | undefined;
   if (!noConfidence && !readOnly) {
-    level = touched ? 'green' : confidenceLevel(score, isEmpty);
+    if (touched) level = 'green';
+    else if (explicitLevel) level = explicitLevel;
+    else level = isEmpty ? 'empty' : 'green';
   }
 
   const handleChange: React.ChangeEventHandler<HTMLInputElement | HTMLTextAreaElement> = (e) => {
