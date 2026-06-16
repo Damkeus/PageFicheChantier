@@ -46,14 +46,14 @@ export const SECTION_DEFS: SectionDef[] = [
   },
 ];
 
-export interface GridRow { [column: string]: string; }
+export type GridRow = Record<string, string>;
 
 export interface ParsedGrid {
   key: string;
   title?: string;
   columns: string[];
   rows: GridRow[];
-  levels: Array<Record<string, ConfidenceLevel>>;
+  levels: Record<string, ConfidenceLevel>[];
 }
 
 export interface ParsedSection {
@@ -64,7 +64,7 @@ export interface ParsedSection {
 }
 
 interface RawCell { value?: unknown; text?: unknown; displayName?: string; confidence?: number; }
-interface RawTable { displayName?: string; entries?: Array<Record<string, unknown>>; }
+interface RawTable { displayName?: string; entries?: Record<string, unknown>[]; }
 
 function cellText(cell: RawCell): string {
   const v = cell.value ?? cell.text;
@@ -86,7 +86,7 @@ function findTable(tables: Record<string, unknown>, aiTableNames: string[]): Raw
 function parseGrid(tables: Record<string, unknown>, def: GridDef): ParsedGrid {
   const table = findTable(tables, def.aiTableNames);
   const rows: GridRow[] = [];
-  const levels: Array<Record<string, ConfidenceLevel>> = [];
+  const levels: Record<string, ConfidenceLevel>[] = [];
   const colByNorm = new Map(def.columns.map((c) => [normalizeFieldName(c), c]));
 
   for (const entry of table?.entries ?? []) {
@@ -115,7 +115,7 @@ function parseGrid(tables: Record<string, unknown>, def: GridDef): ParsedGrid {
 
 export function parseCctpTables(cctpJson: string | undefined | null): Record<SectionId, ParsedSection> {
   let tables: Record<string, unknown> = {};
-  if (cctpJson && cctpJson.trim()) {
+  if (cctpJson?.trim()) {
     try {
       const root = JSON.parse(cctpJson) as Record<string, unknown>;
       if (root.tables && typeof root.tables === 'object') tables = root.tables as Record<string, unknown>;
