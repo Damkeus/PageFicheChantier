@@ -21,3 +21,9 @@
 
 # macos
 .DS_Store
+
+# audit cleanup: junk a ne plus committer
+~/
+*.bak
+*.exe
+*.exe.exe

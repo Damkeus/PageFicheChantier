@@ -39,6 +39,22 @@ export interface CurrentSchema {
     liaisons: SchemaLiaison[];
 }
 
+// Persisted shapes stored in `currentSchema`: the runtime-only `id`
+// (a Date.now() value, regenerated on load) is dropped. `orientation`
+// and every other field are kept for a faithful rebuild.
+export type PersistedSchemaElement = Omit<SchemaElement, 'id'>;
+
+export interface PersistedSchemaLiaison {
+    comment: string;
+    ordreSchema: string; // reconstruction key, kept for other PCFs
+    elements: PersistedSchemaElement[];
+}
+
+export interface PersistedCurrentSchema {
+    version: number;
+    liaisons: PersistedSchemaLiaison[];
+}
+
 export interface SchemaTool {
     id: string;
     type: SchemaElement['type'] | 'nzo';

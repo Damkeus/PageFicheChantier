@@ -1,4 +1,9 @@
-import { SchemaElement, SchemaLiaison, CurrentSchema } from './types';
+import {
+    SchemaElement,
+    SchemaLiaison,
+    PersistedSchemaElement,
+    PersistedCurrentSchema,
+} from './types';
 
 export const CURRENT_SCHEMA_VERSION = 1;
 
@@ -114,17 +119,42 @@ export function generateLiaisonId(): string {
 }
 
 /**
+ * Generate a unique id for a schema element. The `seed` keeps ids distinct
+ * when several elements are recreated in the same millisecond (on load).
+ */
+export function generateElementId(seed = 0): string {
+    return `${Date.now()}_${seed}_${Math.random().toString(36).slice(2, 6)}`;
+}
+
+/**
+ * Drop the runtime-only `id` while keeping every persisted field (orientation
+ * included). Undefined fields are omitted by JSON.stringify.
+ */
+function stripElementId(el: SchemaElement): PersistedSchemaElement {
+    return {
+        type: el.type,
+        subtype: el.subtype,
+        x: el.x,
+        y: el.y,
+        orientation: el.orientation,
+        hasZ: el.hasZ,
+        label: el.label,
+    };
+}
+
+/**
  * Serialize liaisons into the `currentSchema` JSON envelope.
  * Recomputes each liaison's ordreSchema from its elements so it stays in sync.
+ * The runtime-only `id` (liaison + elements) is stripped — it is regenerated
+ * on load by parseCurrentSchema.
  */
 export function serializeCurrentSchema(liaisons: SchemaLiaison[]): string {
-    const payload: CurrentSchema = {
+    const payload: PersistedCurrentSchema = {
         version: CURRENT_SCHEMA_VERSION,
         liaisons: liaisons.map(l => ({
-            id: l.id || generateLiaisonId(),
             comment: l.comment || '',
             ordreSchema: generateOrdreSchema(l.elements || []),
-            elements: l.elements || [],
+            elements: (l.elements || []).map(stripElementId),
         })),
     };
     return JSON.stringify(payload);
@@ -179,7 +209,12 @@ function parseCurrentSchemaRaw(json: string): SchemaLiaison[] {
         return liaisons
             .filter((l: unknown): l is Record<string, unknown> => !!l && typeof l === 'object')
             .map((l): SchemaLiaison => {
-                const elements = Array.isArray(l.elements) ? (l.elements as SchemaElement[]) : [];
+                const rawElements = Array.isArray(l.elements) ? (l.elements as SchemaElement[]) : [];
+                // Regenerate the runtime-only id when missing (it is stripped on save).
+                const elements = rawElements.map((el, i): SchemaElement => ({
+                    ...el,
+                    id: typeof el.id === 'string' && el.id ? el.id : generateElementId(i),
+                }));
                 return {
                     id: typeof l.id === 'string' && l.id ? l.id : generateLiaisonId(),
                     comment: typeof l.comment === 'string' ? l.comment : '',

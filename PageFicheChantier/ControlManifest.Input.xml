@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="nex" constructor="PageFicheChantier" version="0.0.47" display-name-key="PageFicheChantier" description-key="PageFicheChantier description" control-type="standard" >
+  <control namespace="nex" constructor="PageFicheChantier" version="1.1.2" display-name-key="PageFicheChantier" description-key="PageFicheChantier description" control-type="standard" >
     <!--external-service-usage node declares whether this 3rd party PCF control is using external service or not, if yes, this control will be considered as premium and please also add the external domain it is using.
     If it is not using any external service, please set the enabled="false" and DO NOT add any domain below. The "enabled" will be false by default.
     Example1:
@@ -15,8 +15,8 @@
       <domain>nexans.sharepoint.com</domain>
     </external-service-usage>
     <!-- property node identifies a specific, configurable piece of data that the control expects from CDS -->
-    <property name="projectData" display-name-key="Project_Data" description-key="JSON data for the project" of-type="SingleLine.TextArea" usage="input" required="true" />
-    <property name="latestChange" display-name-key="Latest_Change_JSON" description-key="JSON data for the latest change" of-type="SingleLine.TextArea" usage="output" required="false" />
+    <property name="projectData" display-name-key="Project_Data" description-key="JSON data for the project" of-type="Multiple" usage="input" required="true" />
+    <property name="latestChange" display-name-key="Latest_Change_JSON" description-key="JSON data for the latest change" of-type="Multiple" usage="output" required="false" />
     <!--
       Property node's of-type attribute can be of-type-group attribute.
       Example:
@@ -44,8 +44,8 @@
       <uses-feature name="WebAPI" required="true" />
     </feature-usage>
     -->
-    <property name="currentSchema" display-name-key="Current_Schema_JSON" description-key="JSON of the saved liaisons/schemas, read on load" of-type="SingleLine.TextArea" usage="input" required="false" />
-    <property name="schemaChange" display-name-key="Schema_Change_JSON" description-key="JSON of the liaisons/schemas emitted on save" of-type="SingleLine.TextArea" usage="output" required="false" />
+    <property name="currentSchema" display-name-key="Current_Schema_JSON" description-key="JSON of the saved liaisons/schemas, read on load" of-type="Multiple" usage="input" required="false" />
+    <property name="schemaChange" display-name-key="Schema_Change_JSON" description-key="JSON of the liaisons/schemas emitted on save" of-type="Multiple" usage="output" required="false" />
     <property name="cctpInterlocuteursExternes" display-name-key="CCTP_Interlocuteurs_Externes" description-key="JSON tableau interlocuteurs externes (édité)" of-type="SingleLine.TextArea" usage="output" required="false" />
     <property name="cctpInterlocuteursClient" display-name-key="CCTP_Interlocuteurs_Client" description-key="JSON tableau interlocuteurs client (édité)" of-type="SingleLine.TextArea" usage="output" required="false" />
     <property name="cctpRedactionIndice" display-name-key="CCTP_Redaction_Indice" description-key="JSON tableaux rédaction et indices (édité)" of-type="SingleLine.TextArea" usage="output" required="false" />
