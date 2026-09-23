@@ -41,11 +41,11 @@ export interface AiFieldLink {
 }
 
 export const AI_FIELD_MAP: AiFieldLink[] = [
-  { key: 'contractNumber', label: 'N°Marché', aiNames: ['Marché cadre'] },
+  { key: 'marketNumber', label: 'N°Marché', aiNames: ['Marché cadre'] },
   { key: 'nombreLiaison', label: 'Nombre Liaison', aiNames: ['Liaison'] },
   { key: 'tores', label: 'tores', aiNames: ['Tores'] },
   { key: 'typeMalt', label: 'Type de Malt', aiNames: ['Type de MALT'] },
-  { key: 'siteAddress', label: 'Adresse Chantier', aiNames: ['Situation des Travaux'] },
+  { key: 'siteAddress', label: 'Centre DI', aiNames: ['Situation des Travaux'] },
   { key: 'circuit', label: 'Circuit', aiNames: ['Circuit'] },
   { key: 'gdp', label: 'GDP', aiNames: ['GDP'] },
   { key: 'length', label: 'Longueur (mètre)', aiNames: ['Longueur Travaux'] },

@@ -1,9 +1,20 @@
 
 
+import {
+    AccessoryOption,
+    ListAccessoireEntry,
+    parseListAccessoire,
+    resolveAccessories,
+    serializeListAccessoire,
+    toSharePointLookup,
+} from './accessories';
+import { CableOption, cableId, findSelectedCables } from './accessoryCatalog';
+
 export type StepId =
     | 'general'
     | 'cctp'
     | 'work_info'
+    | 'accessories'
     | 'client_info'
     | 'nexans_info'
     | 'documents'
@@ -13,12 +24,14 @@ export type StepId =
 
 export type AppMode = 'landing' | 'view' | 'edit' | 'schema' | 'tables';
 
+// An element has NO position: a liaison is an ordered sequence, not a drawing.
+// Its rank in SchemaLiaison.elements IS its left-to-right order — that is the
+// single source of truth. Consumers must never rely on coordinates (v1 carried
+// x/y; they are dropped on load, see parseCurrentSchema).
 export interface SchemaElement {
     id: string;
     type: 'termination' | 'joint' | 'transformer' | 'generator' | 'other';
     subtype?: 'simple' | 'nzo' | 'droite_directe' | 'malt' | 'arret_ecran'; // Subtypes for different asset variants
-    x: number;
-    y: number;
     orientation?: 'left' | 'right'; // For terminations
     hasZ?: boolean; // For "NZO" / Z-mark toggle (optional)
     label?: string; // Free editable text displayed on the element card
@@ -29,8 +42,8 @@ export interface SchemaElement {
 export interface SchemaLiaison {
     id: string;
     comment: string; // Free comment for this liaison
-    ordreSchema: string; // "1,4,5,1" — element type codes (1-6), reconstruction key
-    elements: SchemaElement[]; // Full element data (incl. labels) for faithful rebuild
+    ordreSchema: string; // "1,4,5,1" — element type codes (1-6), derived from `elements` order
+    elements: SchemaElement[]; // Ordered left→right; carries labels/orientation
 }
 
 // Envelope serialized into the `currentSchema` property, read by other PCFs.
@@ -55,11 +68,13 @@ export interface PersistedCurrentSchema {
     liaisons: PersistedSchemaLiaison[];
 }
 
+// A palette entry. Its type/subtype must line up with SchemaElement so placing a
+// tool needs no cast: `nzo` is a termination *subtype*, never a type of its own.
 export interface SchemaTool {
     id: string;
-    type: SchemaElement['type'] | 'nzo';
+    type: SchemaElement['type'];
     label: string;
-    subtype?: string;
+    subtype?: SchemaElement['subtype'];
     iconPath?: string; // For eventually using the PNGs
 }
 
@@ -73,6 +88,7 @@ export const NAV_ITEMS: NavItem[] = [
     { id: 'general', label: 'Général' },
     { id: 'cctp', label: 'CCTP' },
     { id: 'work_info', label: 'Travaux' },
+    { id: 'accessories', label: 'Accessoires' },
     { id: 'client_info', label: 'Client' },
     { id: 'nexans_info', label: 'Nexans' },
     { id: 'documents', label: 'Documents' },
@@ -176,17 +192,28 @@ export interface ProjectData {
     qsheManagerMail: string;
     medecin: string;
     medecinPhone: string;
-    infirmier: string;
-    infirmierPhone: string;
     respServiceInstall: string;
     telRespServiceInstall: string;
     mailRespServiceInstall: string;
 
     // Work Info
     cables: string[];
+    /**
+     * ID des câbles (colonne lookup `Cable`). Identité stable : le libellé seul ne survit
+     * pas au rechargement, SharePoint ne renvoie que le `Title` (« Câbles 90 kV »).
+     */
+    cableIds?: number[];
     accessories: string[];
+    /**
+     * `ListAccessoire` tel que chargé, conservé pour retrouver l'ID d'un accessoire dont
+     * le libellé a changé depuis la dernière sauvegarde. Sans ça, un simple ajustement du
+     * libellé fait perdre la sélection au ré-enregistrement.
+     */
+    accessoryEntries?: ListAccessoireEntry[];
     testDuration: string;
     clientOrderNumber: string;
+    /** N°Marché — colonne SharePoint `field_7`. Distinct de `contractNumber` (= Numéro Projet FRH). */
+    marketNumber: string;
     linkName: string;
     gdp: string;
     gmr: string;
@@ -296,29 +323,18 @@ export interface SharePointLookup {
     Value: string;
 }
 
-export interface AccessoryOption {
-    ID?: number;
-    Id?: number;
-    Title: string;
-    field_5?: string;
-    "Description Nexans France"?: string;
-    "Désignation Nexans Suisse"?: string;
-    Ame?: string;
-}
+// Déclarée dans accessories.ts avec la résolution d'identité qui va avec ;
+// ré-exportée ici pour ne pas casser les imports existants depuis './types'.
+export type { AccessoryOption, ListAccessoireEntry } from './accessories';
 
-export interface CableOption {
-    ID?: number;
-    Id?: number;
-    Title: string;
-    Section?: string;
-    Ame?: string;
-    D_x00e9_tailssuppl_x00e9_mentair?: string;
-    Tension?: string;
-    _x00c2_me?: string;
-    OData__x00c2_me?: string;
-}
+// Déclarée dans accessoryCatalog.ts avec la normalisation qui va avec.
+export type { CableOption } from './accessoryCatalog';
 
 export interface MonteurOption {
+    // Id de l'item dans la liste cible du lookup « Charge travaux Nexans » : c'est la
+    // seule valeur que SharePoint retient sur un lookup, le Value n'est qu'un affichage.
+    ID?: number;
+    Id?: number;
     Title: string;
     field_1?: string; // TEL
     field_2?: string; // EMAIL
@@ -635,11 +651,10 @@ export const INITIAL_DATA: ProjectData = {
     logisticsManager: "", logisticsManagerPhone: "",
     qsheManager: "", qsheManagerPhone: "", qsheManagerMail: "",
     medecin: "", medecinPhone: "",
-    infirmier: "", infirmierPhone: "",
     respServiceInstall: "", telRespServiceInstall: "", mailRespServiceInstall: "",
 
     cables: [], accessories: [], testDuration: "",
-    clientOrderNumber: "", linkName: "", length: "", gdp: "", gmr: "",
+    clientOrderNumber: "", marketNumber: "", linkName: "", length: "", gdp: "", gmr: "",
     decret: "", jonctionPuissance: "", tension: "",
     tores: "", circuit: "", extremitePoste: "", phenomeneInduction: "", typeMalt: "",
 
@@ -780,14 +795,18 @@ export const mapSharePointDataToProjectData = (jsonInput: string | RawProjectDat
         workManagerName: raw.ChargetravauxNexans?.Value || "",
         workManagerId: raw.ChargetravauxNexans?.Id || raw.ChargetravauxNexansId || 0,
         workManagerEmail: raw.Mailcharg_x00e9_TravauxNexans || "",
-        workManagerPhone: raw.field_62 || "",
+        // field_60 = « Tel Chargé de travaux Nexans ». field_62 appartient au technicien
+        // support projet : l'utiliser ici écrasait son téléphone à chaque sauvegarde.
+        workManagerPhone: raw.field_60 || "",
 
         salesManager: raw.field_55 || "",
         salesManagerMail: raw.MailFranceSalesInstallationManag || "",
         salesManagerPhone: raw.field_56 || "",
 
-        trainingName: raw.field_61 || "",
-        trainingPhone: raw.field_72 || "",
+        // field_73/74 = « Nom / Tel Formation Nexans ». field_61 appartient au technicien
+        // support projet et field_72 au médecin du travail : le PCF écrasait leurs contacts.
+        trainingName: raw.field_73 || "",
+        trainingPhone: raw.field_74 || "",
 
         directorExecution: raw.field_53 || "",
         directorExecutionPhone: raw.field_54 || "",
@@ -809,34 +828,27 @@ export const mapSharePointDataToProjectData = (jsonInput: string | RawProjectDat
         medecin: raw.field_71 || "",
         medecinPhone: raw.field_72 || "",
 
-        infirmier: raw.field_73 || "",
-        infirmierPhone: raw.field_74 || "",
 
         respServiceInstall: raw.Resp_ServiceInstal || raw.field_75 || "",
         telRespServiceInstall: raw.TelRespServiceInstall || raw.field_76 || "",
         mailRespServiceInstall: raw.MailRespServiceInstall || "",
 
         // Work Info
-        cables: raw.Tension ? [raw.Tension] : [],
+        // Libellés reconstruits dans l'app depuis `cableIds` une fois le référentiel chargé.
+        cables: [],
+        cableIds: ((raw.Cable ?? []) as SPListExpandedReference[]).map((c) => c.Id).filter((id): id is number => typeof id === 'number' && id > 0),
         accessories: (() => {
-            if (raw.ListAccessoire) {
-                try {
-                    const parsed = JSON.parse(raw.ListAccessoire);
-                    const result: string[] = [];
-                    parsed.forEach((item: any) => {
-                        for (let i = 0; i < (item.quantity || 1); i++) {
-                            result.push(item.value);
-                        }
-                    });
-                    return result;
-                } catch (e) {
-                    console.error("Failed to parse ListAccessoire JSON", e);
-                }
+            const entries = parseListAccessoire(raw.ListAccessoire);
+            if (entries.length > 0) {
+                return entries.flatMap((e) => Array<string>(e.quantity).fill(e.value));
             }
             return raw.Accessoire ? raw.Accessoire.map((a: any) => a.Value) : [];
         })(),
+        // Gardé brut : c'est la seule trace des ID quand les libellés ont bougé.
+        accessoryEntries: parseListAccessoire(raw.ListAccessoire),
         testDuration: raw.Dur_x00e9_edesessais ? raw.Dur_x00e9_edesessais.toString() : "",
         clientOrderNumber: raw.field_4 || raw.Numero_Commande_Client || "",
+        marketNumber: raw.field_7 || "",
         linkName: raw.NombreLiaison || raw.Nom_Liaison || "",
         gdp: raw.GDP || "",
         gmr: raw.GMR || "",
@@ -1002,7 +1014,7 @@ export const mapProjectDataToSharePointData = (
         field_50: data.nexansAddress,
         Adresse_Nexans: data.nexansAddress, // legacy alias
         Mailcharg_x00e9_TravauxNexans: data.workManagerEmail,
-        field_62: data.workManagerPhone,
+        field_60: data.workManagerPhone,
         ChargetravauxNexans: {
             "@odata.type": "#Microsoft.Azure.Connectors.SharePoint.SPListExpandedReference",
             Id: data.workManagerId || 0,
@@ -1013,8 +1025,8 @@ export const mapProjectDataToSharePointData = (
         MailFranceSalesInstallationManag: data.salesManagerMail,
         field_56: data.salesManagerPhone,
 
-        field_61: data.trainingName,
-        // field_72 used for both training phone and medecin phone - conflict
+        field_73: data.trainingName,
+        field_74: data.trainingPhone,
 
         field_53: data.directorExecution,
         field_54: data.directorExecutionPhone,
@@ -1036,8 +1048,6 @@ export const mapProjectDataToSharePointData = (
         field_71: data.medecin,
         field_72: data.medecinPhone,
 
-        field_73: data.infirmier,
-        field_74: data.infirmierPhone,
 
         Resp_ServiceInstal: data.respServiceInstall,
         field_75: data.respServiceInstall, // legacy alias
@@ -1046,9 +1056,13 @@ export const mapProjectDataToSharePointData = (
         MailRespServiceInstall: data.mailRespServiceInstall,
 
         // Work Info
-        Tension: data.tension || (data.cables?.length > 0 ? data.cables[0] : ""),
+        // À défaut de saisie, la tension du premier câble choisi (« 90 kV »), pas son libellé complet.
+        Tension: data.tension
+            || findSelectedCables(fullCables ?? [], data.cables, data.cableIds ?? [])[0]?.Tension
+            || "",
         Dur_x00e9_edesessais: data.testDuration,
         field_4: data.clientOrderNumber,
+        field_7: data.marketNumber,
         Numero_Commande_Client: data.clientOrderNumber, // legacy alias
         GDP: data.gdp,
         GMR: data.gmr,
@@ -1108,74 +1122,46 @@ export const mapProjectDataToSharePointData = (
         TelCoordonateurSPS: data.telCoordinateurSps,
         MailCoordonateurSPS: data.mailCoordinateurSps,
 
-        // 🟢 FIX: Map Accessoire objects with ID
-        Accessoire: data.accessories.map(accName => {
-            const found = fullAccessories?.find(fa => {
-                const part1 = fa.field_5 || fa.Title;
-                const part2 = fa.Ame ? ` - ${fa.Ame}` : "";
-                const generatedName = (part1 + part2) || "";
-                return generatedName === accName;
-            });
+        // Résolution par ID (cf. accessories.ts). La colonne `Accessoire` est la SEULE que
+        // le flux PAQ2 lit : s'il n'y trouve rien, il n'itère pas et le tableau accessoires
+        // du document sort vide.
+        Accessoire: toSharePointLookup(
+            resolveAccessories(data.accessories, fullAccessories ?? [], data.accessoryEntries).resolved,
+            fullAccessories ?? [],
+        ),
 
-            const foundId = found?.ID || found?.Id;
-            if (foundId) {
-                return { Id: foundId, Value: found.Title, "@odata.type": "#Microsoft.Azure.Connectors.SharePoint.SPListExpandedReference" };
-            }
-            return { Id: -1, Value: accName, "@odata.type": "#Microsoft.Azure.Connectors.SharePoint.SPListExpandedReference" }; // Fallback
-        }).filter(a => a.Id !== -1),
-
-        // 🟢 NOUVEAU: ListAccessoire en JSON avec quantité
         ListAccessoire: (() => {
-            const listObj = data.accessories.reduce((acc, accName) => {
-                if (!acc[accName]) {
-                    const found = fullAccessories?.find(fa => {
-                        const part1 = fa.field_5 || fa.Title;
-                        const part2 = fa.Ame ? ` - ${fa.Ame}` : "";
-                        const generatedName = (part1 + part2) || "";
-                        return generatedName === accName;
-                    });
-                    const foundId = found?.ID || found?.Id || -1;
-                    acc[accName] = { id: foundId, value: accName, quantity: 1 };
-                } else {
-                    acc[accName].quantity += 1;
-                }
-                return acc;
-            }, {} as Record<string, { id: number, value: string, quantity: number }>);
-            return JSON.stringify(Object.values(listObj));
+            const { resolved } = resolveAccessories(
+                data.accessories, fullAccessories ?? [], data.accessoryEntries,
+            );
+            return serializeListAccessoire(
+                resolved.map((r) => ({ id: r.id, value: r.label, quantity: r.quantity })),
+            );
         })(),
 
-        // 🟢 FIX: Map Cable objects with ID
-        Cable: data.cables.map(cableName => {
-            const found = fullCables?.find(fc => {
-                const parts = [
-                    fc.Title,
-                    fc.Section,
-                    fc.Ame,
-                    fc.D_x00e9_tailssuppl_x00e9_mentair,
-                    fc._x00c2_me,
-                    fc.OData__x00c2_me
-                ].filter(Boolean).join(" - ");
-                return parts === cableName;
-            });
-
-            if (found?.ID) {
-                return { Id: found.ID, Value: found.Title, "@odata.type": "#Microsoft.Azure.Connectors.SharePoint.SPListExpandedReference" };
-            }
-            return { Id: -1, Value: cableName, "@odata.type": "#Microsoft.Azure.Connectors.SharePoint.SPListExpandedReference" };
-        }).filter(c => c.Id !== -1),
+        // Par ID d'abord, puis par libellé. Un câble inconnu du référentiel ne peut pas être
+        // écrit dans un lookup : il est ignoré, comme avant.
+        Cable: findSelectedCables(fullCables ?? [], data.cables, data.cableIds ?? [])
+            .filter((c) => cableId(c) !== undefined)
+            .map((c) => ({
+                Id: cableId(c)!,
+                Value: c.Title,
+                "@odata.type": "#Microsoft.Azure.Connectors.SharePoint.SPListExpandedReference",
+            })),
 
         Effectif_x0020_Sous_x0020_Traita: data.effectifSousTraitant,
 
         Achat: data.achat,
         Statut_x0020_du_x0020_projet: data.statut,
 
-        // Schema
-        Schema_Uni: data.ordreSchema, // Maps to the IDs (CSV)
-        SchemaData: data.schemaData,  // Maps to the JSON
-        OrdreSchema: data.ordreSchema,
+        // Schema — SchemaData is the single source of truth: it carries the full
+        // v2 envelope (order + comments + labels + multi-liaison).
+        // Schema_Uni (deleted from the list) and OrdreSchema (lives in another
+        // table) are deliberately NOT written: they were dead columns.
+        SchemaData: data.schemaData,
 
         // PowerApps Aliases (lowercase for easy JSON access)
-        ordreSchema: data.ordreSchema,
+        ordreSchema: data.ordreSchema, // CSV of the 1st liaison — read-only convenience
         schemaData: data.schemaData
     };
 };

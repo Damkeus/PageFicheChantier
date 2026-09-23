@@ -171,3 +171,108 @@ export function seedRows(grid: ParsedGrid): GridRow[] {
     ? grid.rows.map((r) => ({ ...r }))
     : [emptyRow(grid.columns)];
 }
+
+/* ------------------------------------------------------------------------- *
+ * Relecture des tableaux DÉJÀ ENREGISTRÉS (colonnes SharePoint).
+ *
+ * Power Apps renvoie les 5 colonnes dans une propriété d'entrée unique, via
+ * `JSON({externes: ThisItem.Col…, client: …})`. Les valeurs sont donc des
+ * CHAÎNES contenant elles-mêmes du JSON (double encodage) — mais on accepte
+ * aussi des objets déjà décodés, et les clés `outputKey` du manifest.
+ *
+ * Règle métier : ce qui est enregistré prime toujours sur l'extraction IA.
+ * ------------------------------------------------------------------------- */
+
+export type SavedTables = Partial<Record<SectionId, SerializedGrid[]>>;
+
+/** Clés acceptées dans le JSON combiné : SectionId ('externes') ou outputKey. */
+const SECTION_BY_KEY: Map<string, SectionId> = (() => {
+  const m = new Map<string, SectionId>();
+  for (const def of SECTION_DEFS) {
+    m.set(def.id.toLowerCase(), def.id);
+    m.set(def.outputKey.toLowerCase(), def.id);
+  }
+  return m;
+})();
+
+function cellString(v: unknown): string {
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+  return '';
+}
+
+/** Décode une section : objet déjà parsé OU chaîne JSON (double encodage). */
+function coerceSavedSection(raw: unknown): SerializedGrid[] | undefined {
+  let value = raw;
+  if (typeof value === 'string') {
+    if (!value.trim()) return undefined;
+    try { value = JSON.parse(value); } catch { return undefined; }
+  }
+  if (!value || typeof value !== 'object') return undefined;
+  const grids = (value as { grids?: unknown }).grids;
+  if (!Array.isArray(grids)) return undefined;
+
+  const out: SerializedGrid[] = [];
+  for (const g of grids) {
+    if (!g || typeof g !== 'object') continue;
+    const grid = g as { key?: unknown; columns?: unknown; rows?: unknown };
+    out.push({
+      key: typeof grid.key === 'string' ? grid.key : '',
+      columns: Array.isArray(grid.columns) ? grid.columns.filter((c): c is string => typeof c === 'string') : [],
+      rows: Array.isArray(grid.rows)
+        ? grid.rows.filter((r): r is GridRow => !!r && typeof r === 'object' && !Array.isArray(r))
+        : [],
+    });
+  }
+  return out;
+}
+
+/** Parse le JSON combiné des colonnes enregistrées. Jamais d'exception. */
+export function parseSavedTables(json: string | undefined | null): SavedTables {
+  const out: SavedTables = {};
+  if (!json?.trim()) return out;
+
+  let root: unknown;
+  try { root = JSON.parse(json); } catch { return out; }
+  if (!root || typeof root !== 'object') return out;
+
+  for (const [key, raw] of Object.entries(root as Record<string, unknown>)) {
+    const id = SECTION_BY_KEY.get(key.trim().toLowerCase());
+    if (!id) continue;
+    const grids = coerceSavedSection(raw);
+    if (grids) out[id] = grids;
+  }
+  return out;
+}
+
+/**
+ * Vrai si la section enregistrée contient au moins une cellule non vide.
+ * Une section réduite à des lignes blanches ne doit PAS masquer l'onglet IA.
+ */
+export function hasSavedRows(grids: SerializedGrid[] | undefined): boolean {
+  return !!grids?.some((g) => g.rows.some((r) => Object.values(r).some((v) => cellString(v).trim() !== '')));
+}
+
+/**
+ * Lignes éditables issues de l'enregistrement, normalisées sur les colonnes
+ * courantes (appariement par `normalizeFieldName`, colonnes manquantes vides).
+ * Les lignes entièrement vides sont écartées ; au moins une ligne blanche est
+ * rendue pour garder une grille éditable.
+ */
+export function seedRowsFromSaved(def: GridDef, saved?: SerializedGrid): GridRow[] {
+  const rows: GridRow[] = [];
+  for (const raw of saved?.rows ?? []) {
+    const byNorm = new Map<string, string>();
+    for (const [k, v] of Object.entries(raw)) byNorm.set(normalizeFieldName(k), cellString(v));
+
+    const row = emptyRow(def.columns);
+    for (const c of def.columns) row[c] = byNorm.get(normalizeFieldName(c)) ?? '';
+    if (def.columns.some((c) => row[c].trim() !== '')) rows.push(row);
+  }
+  return rows.length > 0 ? rows : [emptyRow(def.columns)];
+}
+
+/** Amorçage complet d'une section depuis l'enregistrement (grille par grille). */
+export function seedSectionFromSaved(def: SectionDef, grids: SerializedGrid[] | undefined): GridRow[][] {
+  return def.grids.map((g, i) => seedRowsFromSaved(g, grids?.find((s) => s.key === g.key) ?? grids?.[i]));
+}

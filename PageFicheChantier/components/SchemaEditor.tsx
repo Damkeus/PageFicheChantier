@@ -1,7 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Download, ArrowLeft, Trash2, HelpCircle, X, Move, Plus, Tag } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import {
+    Download, ArrowLeft, Trash2, HelpCircle, X, Plus, Tag,
+    ChevronLeft, ChevronRight, ArrowLeftRight, GripHorizontal, Copy
+} from 'lucide-react';
 import { SchemaElement, SchemaTool, SchemaLiaison } from '../types';
-import { generateOrdreSchema, generateLiaisonId } from '../schemaConstants';
+import { generateOrdreSchema, generateLiaisonId, generateElementId } from '../schemaConstants';
 import { Toast } from './Toast';
 
 // Import Base64 Assets from assets.ts
@@ -20,6 +23,20 @@ interface SchemaEditorProps {
     onSave: (liaisons: SchemaLiaison[]) => void;
 }
 
+const TOOLS: SchemaTool[] = [
+    { id: 't-simple', type: 'termination', subtype: 'simple', label: 'Extrémité' },
+    { id: 't-nzo', type: 'termination', subtype: 'nzo', label: 'ZnO' },
+    { id: 't-droite', type: 'termination', subtype: 'droite_directe', label: 'D.Directe' },
+    { id: 'j-simple', type: 'joint', subtype: 'simple', label: 'Jonction' },
+    { id: 'j-malt', type: 'joint', subtype: 'malt', label: 'Jct Malt' },
+    { id: 'j-arret', type: 'joint', subtype: 'arret_ecran', label: 'Jct Arrêt' },
+];
+
+// Distance from a card's outer top to the centre of its image row.
+// Keeps the connector segments visually aligned with the assets:
+// p-3 (12px) + image row h-24 (96px) / 2 = 60px.
+const CONNECTOR_OFFSET = 60;
+
 const makeLiaison = (): SchemaLiaison => ({
     id: generateLiaisonId(),
     comment: '',
@@ -27,17 +44,33 @@ const makeLiaison = (): SchemaLiaison => ({
     elements: [],
 });
 
-export const SchemaEditor: React.FC<SchemaEditorProps> = ({ initialLiaisons, onBack, onSave }) => {
-    const canvasRef = useRef<HTMLDivElement>(null);
-    const containerRef = useRef<HTMLDivElement>(null);
+const getAsset = (type: string, subtype?: string): string => {
+    if (type === 'termination') {
+        if (subtype === 'nzo') return EXTRMIT_NZOJPG_IMG;
+        if (subtype === 'droite_directe') return EXT_DROITE_DDIRECTEPNG_IMG;
+        return EXTRMITJPG_IMG;
+    }
+    if (type === 'joint') {
+        if (subtype === 'malt') return JONCTION_AVEC_MALTJPG_IMG;
+        if (subtype === 'arret_ecran') return JONCTION_AVEC_ARRT_DCRANJPG_IMG;
+        return JONCTIONJPG_IMG;
+    }
+    return '';
+};
 
-    // Multi-liaison state — each liaison is its own single-line diagram
+export const SchemaEditor: React.FC<SchemaEditorProps> = ({ initialLiaisons, onBack, onSave }) => {
+    // Multi-liaison state — each liaison is one ordered sequence of elements.
     const [liaisons, setLiaisons] = useState<SchemaLiaison[]>(() =>
         initialLiaisons.length > 0 ? initialLiaisons : [makeLiaison()]
     );
     const [activeLiaisonId, setActiveLiaisonId] = useState<string>(() =>
-        (initialLiaisons[0]?.id) || ''
+        initialLiaisons[0]?.id || ''
     );
+
+    const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
+    const [dragIndex, setDragIndex] = useState<number | null>(null);
+    const [showHelp, setShowHelp] = useState(true);
+    const [showToast, setShowToast] = useState(false);
 
     // Keep the active liaison id valid after add/delete
     useEffect(() => {
@@ -48,117 +81,88 @@ export const SchemaEditor: React.FC<SchemaEditorProps> = ({ initialLiaisons, onB
 
     const activeLiaison = liaisons.find(l => l.id === activeLiaisonId) ?? liaisons[0];
     const elements = activeLiaison?.elements ?? [];
+    const selectedElement = elements.find(e => e.id === selectedElementId) ?? null;
+    const selectedIndex = elements.findIndex(e => e.id === selectedElementId);
+    const liveOrdre = generateOrdreSchema(elements);
 
-    // Update the elements of the active liaison (immutable)
+    // --- Element mutations (immutable) ---
+
     const setElements = (updater: (prev: SchemaElement[]) => SchemaElement[]) => {
         setLiaisons(prev => prev.map(l =>
-            l.id === (activeLiaison?.id)
-                ? { ...l, elements: updater(l.elements) }
-                : l
+            l.id === activeLiaison?.id ? { ...l, elements: updater(l.elements) } : l
         ));
     };
 
-    // UI State
-    const [showHelp, setShowHelp] = useState(true);
-    const [showToast, setShowToast] = useState(false);
-
-    const handleSaveClick = () => {
-        onSave(liaisons);
-        setShowToast(true);
+    const handleAddTool = (tool: SchemaTool) => {
+        const el: SchemaElement = {
+            id: generateElementId(elements.length),
+            type: tool.type,
+            subtype: tool.subtype,
+            orientation: 'left',
+        };
+        setElements(prev => [...prev, el]);
+        setSelectedElementId(el.id);
     };
 
-    // Tool drag-and-drop creation state
-    const [draggingTool, setDraggingTool] = useState<SchemaTool | null>(null);
-    const [isDraggingNewTool, setIsDraggingNewTool] = useState(false);
-    const [toolDragPos, setToolDragPos] = useState({ x: 0, y: 0 });
-
-    // Canvas element manipulation state
-    const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
-    const [isDraggingElement, setIsDraggingElement] = useState(false);
-    const [draggingElementId, setDraggingElementId] = useState<string | null>(null);
-    const [dragStartPos, setDragStartPos] = useState({ x: 0, y: 0 });
-    const [elementStartPos, setElementStartPos] = useState({ x: 0, y: 0 });
-    const [hasMoved, setHasMoved] = useState(false);
-
-    // Click-to-place mode
-    const [selectedTool, setSelectedTool] = useState<SchemaTool | null>(null);
-
-    // Double-click detection
-    const [lastClickTime, setLastClickTime] = useState<{ id: string; time: number } | null>(null);
-
-    const selectedElement = elements.find(e => e.id === selectedElementId) ?? null;
-
-    const TOOLS: SchemaTool[] = [
-        { id: 't-simple', type: 'termination', subtype: 'simple', label: 'Extrémité' },
-        { id: 't-nzo', type: 'termination', subtype: 'nzo', label: 'ZnO' },
-        { id: 't-droite', type: 'termination', subtype: 'droite_directe', label: 'D.Directe' },
-        { id: 'j-simple', type: 'joint', subtype: 'simple', label: 'Jonction' },
-        { id: 'j-malt', type: 'joint', subtype: 'malt', label: 'Jct Malt' },
-        { id: 'j-arret', type: 'joint', subtype: 'arret_ecran', label: 'Jct Arrêt' },
-    ];
-
-    const GRID = 20;
-    const BASELINE_Y = 300; // Moved down for better centering
-    const SNAP_THRESHOLD = 30; // Magnetic snap distance
-
-    const snapToGrid = (val: number) => Math.round(val / GRID) * GRID;
-
-    // 🔥 NEW: Intelligent snap-to-grid with magnetism
-    const snapToGridAndElements = (rawX: number, rawY: number, excludeId?: string) => {
-        let x = snapToGrid(rawX);
-        let y = snapToGrid(rawY);
-
-        // 1. Magnetic snap to baseline
-        if (Math.abs(y - BASELINE_Y) < SNAP_THRESHOLD) {
-            y = BASELINE_Y;
-        }
-
-        // 2. Magnetic snap to other elements (alignment)
-        elements.forEach(el => {
-            if (el.id === excludeId) return; // Skip the element being dragged
-
-            // Vertical alignment (same X)
-            if (Math.abs(x - el.x) < SNAP_THRESHOLD) {
-                x = el.x;
-            }
-
-            // Horizontal alignment (same Y)
-            if (Math.abs(y - el.y) < SNAP_THRESHOLD) {
-                y = el.y;
-            }
+    /** Move an element to a new rank. This is the only ordering primitive. */
+    const moveElement = (from: number, to: number) => {
+        setElements(prev => {
+            if (from === to || to < 0 || to >= prev.length) return prev;
+            const next = [...prev];
+            const [moved] = next.splice(from, 1);
+            next.splice(to, 0, moved);
+            return next;
         });
-
-        return { x, y };
     };
 
-    // --- Asset Mapping ---
-    const getAsset = (type: string, subtype?: string) => {
-        if (type === 'termination') {
-            if (subtype === 'nzo') return EXTRMIT_NZOJPG_IMG;
-            if (subtype === 'droite_directe') return EXT_DROITE_DDIRECTEPNG_IMG;
-            return EXTRMITJPG_IMG;
-        }
-        if (type === 'joint') {
-            if (subtype === 'malt') return JONCTION_AVEC_MALTJPG_IMG;
-            if (subtype === 'arret_ecran') return JONCTION_AVEC_ARRT_DCRANJPG_IMG;
-            return JONCTIONJPG_IMG;
-        }
-        return '';
+    const handleFlip = (id: string) => {
+        setElements(prev => prev.map(el =>
+            el.id === id
+                ? { ...el, orientation: el.orientation === 'right' ? 'left' : 'right' }
+                : el
+        ));
     };
+
+    const handleDeleteElement = (id: string) => {
+        setElements(prev => prev.filter(e => e.id !== id));
+        setSelectedElementId(prev => (prev === id ? null : prev));
+    };
+
+    const handleLabelChange = (val: string) => {
+        if (!selectedElementId) return;
+        setElements(prev => prev.map(el =>
+            el.id === selectedElementId ? { ...el, label: val } : el
+        ));
+    };
+
+    // --- Drag-to-reorder (mouse-based: HTML5 DnD is unreliable inside PCF) ---
+
+    const handleCardMouseDown = (idx: number, id: string) => {
+        setSelectedElementId(id);
+        setDragIndex(idx);
+    };
+
+    /** Live swap: as the pointer crosses a neighbour, the order updates. */
+    const handleCardMouseEnter = (idx: number) => {
+        if (dragIndex === null || dragIndex === idx) return;
+        moveElement(dragIndex, idx);
+        setDragIndex(idx);
+    };
+
+    const endDrag = () => setDragIndex(null);
 
     // --- Liaison handlers ---
+
     const handleAddLiaison = () => {
         const nl = makeLiaison();
         setLiaisons(prev => [...prev, nl]);
         setActiveLiaisonId(nl.id);
         setSelectedElementId(null);
-        setSelectedTool(null);
     };
 
     const handleSelectLiaison = (id: string) => {
         setActiveLiaisonId(id);
         setSelectedElementId(null);
-        setSelectedTool(null);
     };
 
     const handleDeleteLiaison = (id: string) => {
@@ -169,6 +173,28 @@ export const SchemaEditor: React.FC<SchemaEditorProps> = ({ initialLiaisons, onB
         setSelectedElementId(null);
     };
 
+    /** Duplicate the active liaison (comment + elements), inserted right after it. */
+    const handleDuplicateLiaison = () => {
+        if (!activeLiaison) return;
+        const duplicated: SchemaLiaison = {
+            id: generateLiaisonId(),
+            comment: activeLiaison.comment,
+            ordreSchema: activeLiaison.ordreSchema,
+            elements: activeLiaison.elements.map((el, i) => ({
+                ...el,
+                id: generateElementId(i),
+            })),
+        };
+        setLiaisons(prev => {
+            const idx = prev.findIndex(l => l.id === activeLiaison.id);
+            const next = [...prev];
+            next.splice(idx + 1, 0, duplicated);
+            return next;
+        });
+        setActiveLiaisonId(duplicated.id);
+        setSelectedElementId(null);
+    };
+
     const handleCommentChange = (val: string) => {
         if (!activeLiaison) return;
         setLiaisons(prev => prev.map(l =>
@@ -176,242 +202,51 @@ export const SchemaEditor: React.FC<SchemaEditorProps> = ({ initialLiaisons, onB
         ));
     };
 
-    const handleLabelChange = (val: string) => {
-        if (!selectedElementId) return;
-        setElements(prev => prev.map(el =>
-            el.id === selectedElementId ? { ...el, label: val } : el
-        ));
+    const handleSaveClick = () => {
+        onSave(liaisons);
+        setShowToast(true);
     };
-
-    // --- Handlers ---
-
-    // Custom mouse-based drag for tools (Power Platform compatible)
-    const handleToolMouseDown = (e: React.MouseEvent, tool: SchemaTool) => {
-        e.preventDefault();
-        e.stopPropagation();
-        setDraggingTool(tool);
-        setIsDraggingNewTool(true);
-        setToolDragPos({ x: e.clientX, y: e.clientY });
-    };
-
-    // Click-to-place handler
-    const handleToolClick = (tool: SchemaTool) => {
-        setSelectedTool(prev => prev?.id === tool.id ? null : tool);
-        setSelectedElementId(null);
-    };
-
-    // Canvas click handler for placing selected tool
-    const handleCanvasClick = (e: React.MouseEvent) => {
-        // If clicking on an element, don't place a new one
-        if ((e.target as HTMLElement).closest('g[data-element]')) {
-            return;
-        }
-
-        // Deselect element if clicking on empty canvas
-        if (!selectedTool) {
-            setSelectedElementId(null);
-        }
-
-        // If a tool is selected, place it
-        if (selectedTool && canvasRef.current) {
-            const rect = canvasRef.current.getBoundingClientRect();
-            const rawX = e.clientX - rect.left;
-            const rawY = e.clientY - rect.top;
-
-            const { x, y } = snapToGridAndElements(rawX, rawY);
-
-            const newElement: SchemaElement = {
-                id: Date.now().toString(),
-                type: selectedTool.type,
-                x,
-                y,
-                orientation: 'left',
-                subtype: selectedTool.subtype as any
-            } as SchemaElement;
-
-            setElements(prev => [...prev, newElement]);
-        }
-    };
-
-    // 🔥 IMPROVED: Element mouse down with double-click detection
-    const handleElementMouseDown = (e: React.MouseEvent, id: string) => {
-        e.stopPropagation();
-
-        // Double-click detection
-        const now = Date.now();
-        if (lastClickTime && lastClickTime.id === id && now - lastClickTime.time < 300) {
-            // Double-click detected - flip orientation
-            handleFlipOrientation(id);
-            setLastClickTime(null);
-            return; // Don't start drag on double-click
-        }
-        setLastClickTime({ id, time: now });
-
-        // Start drag
-        setSelectedElementId(id);
-        setIsDraggingElement(true);
-        setDraggingElementId(id);
-        setHasMoved(false);
-        setDragStartPos({ x: e.clientX, y: e.clientY });
-
-        const el = elements.find(E => E.id === id);
-        if (el) {
-            setElementStartPos({ x: el.x, y: el.y });
-        }
-    };
-
-    // 🔥 NEW: Flip orientation handler
-    const handleFlipOrientation = (elementId: string) => {
-        setElements(prev => prev.map(el => {
-            if (el.id === elementId && el.type === 'termination') {
-                return {
-                    ...el,
-                    orientation: el.orientation === 'left' ? 'right' : 'left'
-                };
-            }
-            return el;
-        }));
-    };
-
-    // 🔥 IMPROVED: Mouse move with better snap logic
-    const handleMouseMove = (e: React.MouseEvent) => {
-        // Handle tool drag
-        if (isDraggingNewTool) {
-            setToolDragPos({ x: e.clientX, y: e.clientY });
-        }
-
-        // Handle element drag
-        if (isDraggingElement && selectedElementId) {
-            const dx = e.clientX - dragStartPos.x;
-            const dy = e.clientY - dragStartPos.y;
-
-            // Check if moved significantly
-            if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
-                setHasMoved(true);
-            }
-
-            const newRawX = elementStartPos.x + dx;
-            const newRawY = elementStartPos.y + dy;
-
-            const { x, y } = snapToGridAndElements(newRawX, newRawY, selectedElementId);
-
-            setElements(prev => prev.map(el =>
-                el.id === selectedElementId ? { ...el, x, y } : el
-            ));
-        }
-    };
-
-    // 🔥 IMPROVED: Mouse up with tool placement
-    const handleMouseUp = (e: React.MouseEvent) => {
-        // Handle new tool placement
-        if (isDraggingNewTool && draggingTool && canvasRef.current) {
-            const rect = canvasRef.current.getBoundingClientRect();
-            const rawX = e.clientX - rect.left;
-            const rawY = e.clientY - rect.top;
-
-            // Only place if mouse is over the canvas
-            if (rawX >= 0 && rawY >= 0 && rawX <= rect.width && rawY <= rect.height) {
-                const { x, y } = snapToGridAndElements(rawX, rawY);
-
-                const newElement: SchemaElement = {
-                    id: Date.now().toString(),
-                    type: draggingTool.type,
-                    x,
-                    y,
-                    orientation: 'left',
-                    subtype: draggingTool.subtype as any
-                } as SchemaElement;
-
-                setElements(prev => [...prev, newElement]);
-            }
-        }
-
-        // Reset drag states
-        setIsDraggingNewTool(false);
-        setDraggingTool(null);
-        setIsDraggingElement(false);
-        setDraggingElementId(null);
-        setHasMoved(false);
-    };
-
-    const handleDelete = () => {
-        if (selectedElementId) {
-            setElements(prev => prev.filter(e => e.id !== selectedElementId));
-            setSelectedElementId(null);
-        }
-    };
-
-    const liveOrdre = generateOrdreSchema(elements);
 
     return (
         <div
-            ref={containerRef}
             className="absolute inset-0 z-[9999] flex bg-gray-50 overflow-hidden font-sans"
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
+            onMouseUp={endDrag}
+            onMouseLeave={endDrag}
         >
             <Toast message="Schéma enregistré" show={showToast} onHide={() => setShowToast(false)} />
 
-            {/* Left Sidebar Toolbar */}
+            {/* ---------- Left sidebar: palette ---------- */}
             <div className="w-28 bg-white border-r border-gray-200 flex flex-col shadow-lg z-50">
-                {/* Header */}
                 <div className="p-4 border-b border-gray-200">
                     <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider text-center">Outils</h3>
                 </div>
 
-                {/* Tools */}
                 <div className="flex-1 flex flex-col gap-3 p-3 overflow-y-auto">
-                    {TOOLS.map((tool) => {
-                        const isActive = draggingTool?.id === tool.id || selectedTool?.id === tool.id;
-                        const assetSrc = getAsset(tool.type, tool.subtype as any);
-
-                        return (
-                            <div
-                                key={tool.id}
-                                className="group relative"
-                                onMouseDown={(e) => handleToolMouseDown(e, tool)}
-                                onClick={() => handleToolClick(tool)}
-                            >
-                                <div
-                                    className={`
-                                        relative flex flex-col items-center justify-center w-full aspect-square rounded-xl cursor-grab active:cursor-grabbing transition-all duration-200
-                                        ${isActive ? 'bg-red-50 ring-2 ring-[#A30026] ring-offset-2 scale-105 shadow-lg' : 'hover:bg-gray-50 hover:shadow-md border border-gray-200 hover:border-[#A30026]/30'}
-                                    `}
-                                >
-                                    <div className="w-12 h-12 flex items-center justify-center mb-1">
-                                        {assetSrc ? (
-                                            <img src={assetSrc} alt={tool.label} className="w-full h-full object-contain pointer-events-none select-none" />
-                                        ) : (
-                                            <div className="w-10 h-10 rounded-full bg-[#A30026]/10 flex items-center justify-center text-[#A30026]">
-                                                <span className="font-bold text-xs">{tool.label.substring(0, 2)}</span>
-                                            </div>
-                                        )}
-                                    </div>
-                                    <span className={`text-[9px] font-bold uppercase tracking-wider text-center px-1 leading-tight ${isActive ? 'text-[#A30026]' : 'text-gray-600 group-hover:text-gray-900'}`}>
-                                        {tool.label}
-                                    </span>
-                                </div>
+                    {TOOLS.map(tool => (
+                        <button
+                            key={tool.id}
+                            onClick={() => handleAddTool(tool)}
+                            title={`Ajouter « ${tool.label} » à la fin de la liaison`}
+                            className="group relative flex flex-col items-center justify-center w-full aspect-square rounded-xl border border-gray-200 bg-white transition-all duration-200 hover:border-[#A30026]/40 hover:bg-red-50/50 hover:shadow-md active:scale-95"
+                        >
+                            <div className="w-12 h-12 flex items-center justify-center mb-1">
+                                <img
+                                    src={getAsset(tool.type, tool.subtype)}
+                                    alt={tool.label}
+                                    className="w-full h-full object-contain pointer-events-none select-none"
+                                />
                             </div>
-                        );
-                    })}
+                            <span className="text-[9px] font-bold uppercase tracking-wider text-center px-1 leading-tight text-gray-600 group-hover:text-[#A30026]">
+                                {tool.label}
+                            </span>
+                            <span className="absolute top-1 right-1 w-4 h-4 rounded-full bg-[#A30026] text-white items-center justify-center hidden group-hover:flex">
+                                <Plus className="w-3 h-3" />
+                            </span>
+                        </button>
+                    ))}
                 </div>
 
-                {/* Actions */}
                 <div className="p-3 border-t border-gray-200 space-y-2">
-                    <button
-                        onClick={handleDelete}
-                        disabled={!selectedElementId}
-                        className={`w-full p-3 rounded-xl transition-all flex items-center justify-center gap-2 ${selectedElementId
-                            ? 'text-white bg-[#A30026] hover:bg-[#8a0020] shadow-lg'
-                            : 'text-gray-300 bg-gray-100 cursor-not-allowed'
-                            }`}
-                        title="Supprimer la sélection"
-                    >
-                        <Trash2 className="w-4 h-4" />
-                        <span className="text-xs font-bold">Suppr</span>
-                    </button>
-
                     <button
                         onClick={() => setShowHelp(!showHelp)}
                         className={`w-full p-3 rounded-xl transition-all flex items-center justify-center gap-2 ${showHelp ? 'text-[#A30026] bg-red-50 ring-1 ring-[#A30026]' : 'text-gray-400 hover:text-[#A30026] hover:bg-red-50 bg-gray-50'}`}
@@ -439,9 +274,9 @@ export const SchemaEditor: React.FC<SchemaEditorProps> = ({ initialLiaisons, onB
                 </div>
             </div>
 
-            {/* Canvas Area Column */}
+            {/* ---------- Main column ---------- */}
             <div className="flex-1 flex flex-col p-6 overflow-hidden">
-                {/* 🔥 NEW: Liaison tab bar */}
+                {/* Liaison tabs */}
                 <div className="flex items-center gap-2 mb-3 flex-wrap">
                     {liaisons.map((l, idx) => {
                         const isActive = l.id === activeLiaison?.id;
@@ -455,6 +290,9 @@ export const SchemaEditor: React.FC<SchemaEditorProps> = ({ initialLiaisons, onB
                                     }`}
                             >
                                 <span className="text-xs font-bold">Liaison {idx + 1}</span>
+                                <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${isActive ? 'bg-white/20 text-white/90' : 'bg-gray-100 text-gray-400'}`}>
+                                    {l.elements.length}
+                                </span>
                                 {l.comment && (
                                     <span className={`text-[10px] truncate max-w-[120px] ${isActive ? 'text-white/80' : 'text-gray-400'}`}>
                                         {l.comment}
@@ -477,123 +315,173 @@ export const SchemaEditor: React.FC<SchemaEditorProps> = ({ initialLiaisons, onB
                         <Plus className="w-4 h-4" />
                         Liaison
                     </button>
+                    <button
+                        onClick={handleDuplicateLiaison}
+                        disabled={!activeLiaison}
+                        title="Dupliquer la liaison en cours"
+                        className="flex items-center gap-1 px-3 py-2 rounded-xl bg-white border border-dashed border-gray-300 text-gray-500 hover:border-[#A30026] hover:text-[#A30026] transition-all text-xs font-bold disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                        <Copy className="w-4 h-4" />
+                        Dupliquer
+                    </button>
                 </div>
 
-                {/* 🔥 NEW: Active liaison comment + live order */}
+                {/* Comment + live ordre */}
                 <div className="flex items-center gap-3 mb-3">
                     <input
                         type="text"
                         value={activeLiaison?.comment ?? ''}
                         onChange={(e) => handleCommentChange(e.target.value)}
-                        placeholder="Commentaire de la liaison (lu par les autres PCF)"
+                        placeholder="Commentaire de la liaison"
                         className="flex-1 px-3 py-2 rounded-xl border border-gray-200 text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#A30026]/40 focus:border-[#A30026]"
                     />
-                    <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white border border-gray-200 text-xs font-bold text-gray-500 whitespace-nowrap">
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white border border-gray-200 text-xs font-bold whitespace-nowrap">
                         <span className="text-gray-400 uppercase tracking-wider">Ordre</span>
-                        <span className="text-[#A30026]">{liveOrdre || '—'}</span>
+                        <span className="text-[#A30026] font-mono">{liveOrdre || '—'}</span>
                     </div>
                 </div>
 
-                {/* Canvas */}
-                <div
-                    ref={canvasRef}
-                    className={`flex-1 w-full bg-white rounded-2xl shadow-2xl border-2 border-gray-200 overflow-hidden relative ${selectedTool ? 'cursor-cell' : 'cursor-crosshair'}`}
-                    onClick={handleCanvasClick}
-                >
-                    <svg className="w-full h-full">
-                        <defs>
-                            <pattern id="grid" width={GRID} height={GRID} patternUnits="userSpaceOnUse">
-                                <circle cx="1" cy="1" r="1" fill="#e5e7eb" />
-                            </pattern>
-                        </defs>
-                        <rect width="100%" height="100%" fill="url(#grid)" />
+                {/* ---------- The rail ---------- */}
+                <div className="flex-1 bg-white rounded-2xl shadow-2xl border-2 border-gray-200 overflow-hidden flex flex-col">
+                    <div className="px-5 py-2.5 border-b border-gray-100 flex items-center gap-2 bg-gray-50/60">
+                        <GripHorizontal className="w-3.5 h-3.5 text-[#A30026]" />
+                        <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-400">
+                            Ligne principale — glissez pour réordonner
+                        </span>
+                    </div>
 
-                        {/* Baseline */}
-                        <line x1="0" y1={BASELINE_Y} x2="100%" y2={BASELINE_Y} stroke="#A30026" strokeWidth="3" strokeDasharray="12,8" opacity="0.3" />
-                        <text x="20" y={BASELINE_Y - 10} fill="#A30026" fontSize="11" className="select-none pointer-events-none opacity-50 uppercase tracking-[0.2em] font-bold">Ligne Principale</text>
-
-                        {/* Elements */}
-                        {elements.map(el => (
-                            <g
-                                key={el.id}
-                                data-element="true"
-                                transform={`translate(${el.x}, ${el.y})`}
-                                onMouseDown={(e) => handleElementMouseDown(e, el.id)}
-                                className={`cursor-move transition-opacity duration-200 ${draggingElementId === el.id ? 'opacity-50' : selectedElementId === el.id ? 'opacity-100' : 'opacity-90 hover:opacity-100'}`}
-                            >
-                                {/* Selection indicator */}
-                                {selectedElementId === el.id && (
-                                    <>
-                                        <rect x="-55" y="-75" width="110" height="130" fill="#A30026" fillOpacity="0.08" stroke="#A30026" strokeWidth="3" strokeDasharray="6,6" rx="12" className="animate-pulse" />
-                                        <circle cx="0" cy="-75" r="5" fill="#A30026" />
-                                        <circle cx="0" cy="55" r="5" fill="#A30026" />
-                                        <circle cx="-55" cy="0" r="5" fill="#A30026" />
-                                        <circle cx="55" cy="0" r="5" fill="#A30026" />
-                                    </>
-                                )}
-
-                                <g transform={el.orientation === 'right' ? 'scale(-1, 1)' : ''} className="filter drop-shadow-lg">
-                                    <image
-                                        href={getAsset(el.type, el.subtype)}
-                                        x="-50" y="-50"
-                                        width="100" height="100"
-                                        preserveAspectRatio="xMidYMid meet"
-                                    />
-                                    {el.hasZ && el.subtype !== 'nzo' && (
-                                        <g transform="translate(15, -40)">
-                                            <circle r="12" fill="#A30026" stroke="white" strokeWidth="2" />
-                                            <text x="0" y="4" textAnchor="middle" fontSize="12" fontWeight="bold" fill="white">Z</text>
-                                        </g>
-                                    )}
-                                </g>
-
-                                {/* 🔥 NEW: Element label text (orientation-independent) */}
-                                {el.label && (
-                                    <text
-                                        x="0" y="72"
-                                        textAnchor="middle"
-                                        fontSize="13"
-                                        fontWeight="600"
-                                        fill="#1f2937"
-                                        className="select-none pointer-events-none"
-                                    >
-                                        {el.label}
-                                    </text>
-                                )}
-                            </g>
-                        ))}
-                    </svg>
-
-                    {/* 🔥 IMPROVED: Selected element panel with editable label */}
-                    {selectedElement && (
-                        <div
-                            className="absolute top-4 right-4 bg-white/95 backdrop-blur-md border border-gray-200 px-4 py-3 rounded-xl shadow-2xl flex flex-col gap-2 w-64 animate-in fade-in slide-in-from-top-2"
-                            onClick={(e) => e.stopPropagation()}
-                            onMouseDown={(e) => e.stopPropagation()}
-                        >
-                            <div className="flex items-center gap-2 text-[#A30026]">
-                                <Move className="w-4 h-4" />
-                                <span className="text-xs font-bold">Élément sélectionné</span>
+                    {elements.length === 0 ? (
+                        <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-8">
+                            <div className="w-14 h-14 rounded-2xl bg-red-50 border border-dashed border-[#A30026]/30 flex items-center justify-center">
+                                <Plus className="w-6 h-6 text-[#A30026]/50" />
                             </div>
-                            <label className="flex items-center gap-2 text-[11px] font-bold text-gray-500 uppercase tracking-wider">
-                                <Tag className="w-3.5 h-3.5" />
-                                Texte / repère
-                            </label>
+                            <p className="text-sm font-bold text-gray-600">Liaison vide</p>
+                            <p className="text-xs text-gray-400 max-w-xs leading-relaxed">
+                                Cliquez un outil dans la barre latérale pour l'ajouter à la suite.
+                                Seul l'ordre de gauche à droite compte.
+                            </p>
+                        </div>
+                    ) : (
+                        <div className="flex-1 overflow-x-auto overflow-y-hidden flex items-center">
+                            <div className="inline-flex items-start px-8 py-6 min-w-full">
+                                {elements.map((el, idx) => {
+                                    const isSelected = el.id === selectedElementId;
+                                    const isDragging = dragIndex === idx;
+
+                                    return (
+                                        <React.Fragment key={el.id}>
+                                            {idx > 0 && (
+                                                <div
+                                                    className="h-[3px] w-8 shrink-0 rounded-full bg-[#A30026]/25"
+                                                    style={{ marginTop: CONNECTOR_OFFSET }}
+                                                />
+                                            )}
+
+                                            <div
+                                                onMouseDown={() => handleCardMouseDown(idx, el.id)}
+                                                onMouseEnter={() => handleCardMouseEnter(idx)}
+                                                className={`
+                                                    group relative w-32 shrink-0 rounded-2xl border bg-white p-3 select-none
+                                                    transition-all duration-150 cursor-grab active:cursor-grabbing
+                                                    ${isDragging
+                                                        ? 'opacity-40 scale-95 border-[#A30026] shadow-inner'
+                                                        : isSelected
+                                                            ? 'border-[#A30026] ring-2 ring-[#A30026]/30 shadow-lg -translate-y-1'
+                                                            : 'border-gray-200 hover:border-[#A30026]/40 hover:shadow-md hover:-translate-y-0.5'}
+                                                `}
+                                            >
+                                                {/* Rank badge — the rank IS the persisted order */}
+                                                <span className={`absolute -top-2 -left-2 w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold shadow-sm ring-2 ring-white ${isSelected ? 'bg-[#A30026] text-white' : 'bg-gray-200 text-gray-600'}`}>
+                                                    {idx + 1}
+                                                </span>
+
+                                                <div className="h-24 flex items-center justify-center pointer-events-none">
+                                                    <img
+                                                        src={getAsset(el.type, el.subtype)}
+                                                        alt={el.subtype ?? el.type}
+                                                        className={`max-h-full max-w-full object-contain drop-shadow transition-transform ${el.orientation === 'right' ? '-scale-x-100' : ''}`}
+                                                    />
+                                                </div>
+
+                                                <p className={`mt-1 h-8 text-center text-[11px] font-semibold leading-tight line-clamp-2 ${el.label ? 'text-gray-700' : 'text-gray-300 italic font-normal'}`}>
+                                                    {el.label || 'sans repère'}
+                                                </p>
+
+                                                {/* Per-card actions */}
+                                                <div className={`flex items-center justify-center gap-0.5 mt-1 transition-opacity ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                                                    <button
+                                                        onMouseDown={(e) => e.stopPropagation()}
+                                                        onClick={() => moveElement(idx, idx - 1)}
+                                                        disabled={idx === 0}
+                                                        title="Décaler à gauche"
+                                                        className="p-1 rounded-md text-gray-400 hover:text-[#A30026] hover:bg-red-50 disabled:opacity-25 disabled:hover:bg-transparent disabled:hover:text-gray-400"
+                                                    >
+                                                        <ChevronLeft className="w-3.5 h-3.5" />
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onMouseDown={(e) => e.stopPropagation()}
+                                                        onClick={() => handleFlip(el.id)}
+                                                        title="Inverser le sens (miroir)"
+                                                        className="p-1 rounded-md text-gray-400 hover:text-[#A30026] hover:bg-red-50"
+                                                    >
+                                                        <ArrowLeftRight className="w-3.5 h-3.5" />
+                                                    </button>
+                                                    <button
+                                                        onMouseDown={(e) => e.stopPropagation()}
+                                                        onClick={() => handleDeleteElement(el.id)}
+                                                        title="Supprimer l'élément"
+                                                        className="p-1 rounded-md text-gray-400 hover:text-white hover:bg-[#A30026]"
+                                                    >
+                                                        <Trash2 className="w-3.5 h-3.5" />
+                                                    </button>
+                                                    <button
+                                                        onMouseDown={(e) => e.stopPropagation()}
+                                                        onClick={() => moveElement(idx, idx + 1)}
+                                                        disabled={idx === elements.length - 1}
+                                                        title="Décaler à droite"
+                                                        className="p-1 rounded-md text-gray-400 hover:text-[#A30026] hover:bg-red-50 disabled:opacity-25 disabled:hover:bg-transparent disabled:hover:text-gray-400"
+                                                    >
+                                                        <ChevronRight className="w-3.5 h-3.5" />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </React.Fragment>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Selected element — label editor */}
+                    {selectedElement && (
+                        <div className="border-t border-gray-100 bg-gray-50/60 px-5 py-3 flex items-center gap-3">
+                            <div className="flex items-center gap-2 text-[#A30026] shrink-0">
+                                <Tag className="w-4 h-4" />
+                                <span className="text-[11px] font-bold uppercase tracking-wider whitespace-nowrap">
+                                    Repère n°{selectedIndex + 1}
+                                </span>
+                            </div>
                             <input
                                 type="text"
                                 value={selectedElement.label ?? ''}
                                 onChange={(e) => handleLabelChange(e.target.value)}
-                                placeholder="Ex: R1, Poste 2…"
-                                autoFocus
-                                className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#A30026]/40 focus:border-[#A30026]"
+                                placeholder="Ex: Transfo, Pylone..."
+                                className="flex-1 px-3 py-2 rounded-lg border border-gray-200 text-sm text-gray-800 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#A30026]/40 focus:border-[#A30026]"
                             />
-                            <p className="text-[10px] text-gray-400 leading-tight">Glissez l'élément pour le déplacer. Double-clic pour inverser une extrémité.</p>
+                            <button
+                                onClick={() => setSelectedElementId(null)}
+                                className="p-2 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-200 transition-colors shrink-0"
+                                title="Fermer"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
                         </div>
                     )}
                 </div>
             </div>
 
-            {/* Help Overlay */}
+            {/* ---------- Help ---------- */}
             {showHelp && (
                 <div className="absolute bottom-6 right-6 max-w-sm bg-white/95 backdrop-blur-md p-5 rounded-2xl shadow-2xl border border-gray-200 text-sm z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
                     <div className="flex justify-between items-start mb-3">
@@ -605,45 +493,26 @@ export const SchemaEditor: React.FC<SchemaEditorProps> = ({ initialLiaisons, onB
                     </div>
                     <ul className="space-y-2.5 text-gray-600 text-[11px]">
                         <li className="flex items-start gap-3">
-                            <span className="bg-red-50 border border-[#A30026] text-[#A30026] px-1.5 py-0.5 rounded font-bold text-[9px] min-w-[55px] text-center tracking-wide">GLISSER</span>
-                            <span>Glisser un outil depuis la barre latérale vers le canvas</span>
+                            <span className="bg-red-50 border border-[#A30026] text-[#A30026] px-1.5 py-0.5 rounded font-bold text-[9px] min-w-[55px] text-center tracking-wide">AJOUTER</span>
+                            <span>Cliquer un outil l'ajoute à la fin de la liaison active</span>
                         </li>
                         <li className="flex items-start gap-3">
-                            <span className="bg-red-50 border border-[#A30026] text-[#A30026] px-1.5 py-0.5 rounded font-bold text-[9px] min-w-[55px] text-center tracking-wide">CLIC</span>
-                            <span>Sélectionner un outil puis cliquer sur le canvas pour le placer</span>
+                            <span className="bg-red-50 border border-[#A30026] text-[#A30026] px-1.5 py-0.5 rounded font-bold text-[9px] min-w-[55px] text-center tracking-wide">ORDRE</span>
+                            <span>Glisser une carte sur sa voisine, ou utiliser ◀ ▶, pour la réordonner</span>
                         </li>
                         <li className="flex items-start gap-3">
-                            <span className="bg-red-50 border border-[#A30026] text-[#A30026] px-1.5 py-0.5 rounded font-bold text-[9px] min-w-[55px] text-center tracking-wide">TEXTE</span>
-                            <span>Sélectionner un élément pour lui ajouter un repère/texte</span>
+                            <span className="bg-red-50 border border-[#A30026] text-[#A30026] px-1.5 py-0.5 rounded font-bold text-[9px] min-w-[55px] text-center tracking-wide">REPÈRE</span>
+                            <span>Sélectionner une carte pour saisir son texte (ex : Transfo LSA)</span>
                         </li>
                         <li className="flex items-start gap-3">
                             <span className="bg-red-50 border border-[#A30026] text-[#A30026] px-1.5 py-0.5 rounded font-bold text-[9px] min-w-[55px] text-center tracking-wide">LIAISON</span>
-                            <span>Ajouter plusieurs liaisons via les onglets en haut</span>
+                            <span>Gérer plusieurs liaisons via les onglets en haut</span>
                         </li>
                         <li className="flex items-start gap-3">
-                            <span className="bg-green-50 border border-green-500 text-green-700 px-1.5 py-0.5 rounded font-bold text-[9px] min-w-[55px] text-center tracking-wide">AIMANT</span>
-                            <span>Les éléments s'alignent automatiquement sur la ligne et entre eux !</span>
+                            <span className="bg-green-50 border border-green-500 text-green-700 px-1.5 py-0.5 rounded font-bold text-[9px] min-w-[55px] text-center tracking-wide">ORDRE</span>
+                            <span>Seul l'ordre gauche→droite est enregistré : aucune position à régler</span>
                         </li>
                     </ul>
-                </div>
-            )}
-
-            {/* Drag Ghost */}
-            {isDraggingNewTool && draggingTool && (
-                <div
-                    className="fixed pointer-events-none z-[10000] opacity-80"
-                    style={{
-                        left: toolDragPos.x - 40,
-                        top: toolDragPos.y - 40,
-                    }}
-                >
-                    <div className="w-20 h-20 bg-white rounded-xl shadow-2xl border-3 border-[#A30026] flex items-center justify-center">
-                        <img
-                            src={getAsset(draggingTool.type, draggingTool.subtype)}
-                            alt={draggingTool.label}
-                            className="w-16 h-16 object-contain"
-                        />
-                    </div>
                 </div>
             )}
         </div>

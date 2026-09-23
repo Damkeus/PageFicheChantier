@@ -1,19 +1,27 @@
-import React, { useMemo, useState } from 'react';
-import { X, Save, Sparkles, PenLine, Plus, Trash2 } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { X, Save, Sparkles, PenLine, Plus, Trash2, Lock, AlertTriangle } from 'lucide-react';
 import { CONFIDENCE_COLORS, ConfidenceLevel } from '../confidence';
 import { Toast } from './Toast';
 import {
   SECTION_DEFS,
+  SectionDef,
   SectionId,
   GridRow,
+  ParsedSection,
+  SavedTables,
   parseCctpTables,
+  parseSavedTables,
+  hasSavedRows,
   serializeSection,
   emptyRow,
   seedRows,
+  seedSectionFromSaved,
 } from '../tables';
 
 interface TablesEditorProps {
   cctpJson?: string;
+  /** JSON combiné des colonnes déjà enregistrées. Prime toujours sur l'IA. */
+  savedTablesJson?: string;
   onSaveSection: (outputKey: string, json: string) => void;
   onBack: () => void;
 }
@@ -25,8 +33,32 @@ type EditState = Record<SectionId, GridRow[][]>;
 
 const RED = '#A30026';
 
-export function TablesEditor({ cctpJson, onSaveSection, onBack }: TablesEditorProps) {
+/**
+ * Amorçage d'une section : l'enregistrement SharePoint prime intégralement ;
+ * à défaut seulement, on part de l'extraction IA.
+ */
+function seedSection(def: SectionDef, parsed: Record<SectionId, ParsedSection>, saved: SavedTables): GridRow[][] {
+  return hasSavedRows(saved[def.id])
+    ? seedSectionFromSaved(def, saved[def.id])
+    : parsed[def.id].grids.map((g) => seedRows(g));
+}
+
+function seedAll(parsed: Record<SectionId, ParsedSection>, saved: SavedTables): EditState {
+  const state = {} as EditState;
+  for (const def of SECTION_DEFS) state[def.id] = seedSection(def, parsed, saved);
+  return state;
+}
+
+export function TablesEditor({ cctpJson, savedTablesJson, onSaveSection, onBack }: TablesEditorProps) {
   const parsed = useMemo(() => parseCctpTables(cctpJson), [cctpJson]);
+  const saved = useMemo(() => parseSavedTables(savedTablesJson), [savedTablesJson]);
+
+  /** Section déjà écrite par un utilisateur : édition directe, plus d'onglet IA. */
+  const locked = useMemo(() => {
+    const l = {} as Record<SectionId, boolean>;
+    for (const def of SECTION_DEFS) l[def.id] = hasSavedRows(saved[def.id]);
+    return l;
+  }, [saved]);
 
   const [activeId, setActiveId] = useState<SectionId>(SECTION_DEFS[0].id);
   const [mode, setMode] = useState<Record<SectionId, Mode>>(() => {
@@ -34,24 +66,63 @@ export function TablesEditor({ cctpJson, onSaveSection, onBack }: TablesEditorPr
     for (const s of SECTION_DEFS) m[s.id] = 'ai';
     return m;
   });
-  const [saved, setSaved] = useState(false);
+  const [justSaved, setJustSaved] = useState(false);
+  const [toastMsg, setToastMsg] = useState('');
   const [showToast, setShowToast] = useState(false);
+  const [confirmLeave, setConfirmLeave] = useState(false);
 
-  // Amorçage Saisie main = copie profonde des lignes IA.
-  const [edited, setEdited] = useState<EditState>(() => {
-    const state = {} as EditState;
-    for (const s of SECTION_DEFS) {
-      state[s.id] = parsed[s.id].grids.map((g) => seedRows(g));
-    }
-    return state;
-  });
+  const [edited, setEdited] = useState<EditState>(() => seedAll(parsed, saved));
+
+  // Sections modifiées et non encore enregistrées. Le ref est la source de
+  // vérité synchrone (lu dans les effets), l'état ne sert qu'au rendu.
+  const [dirty, setDirty] = useState<ReadonlySet<SectionId>>(() => new Set<SectionId>());
+  const dirtyRef = useRef<ReadonlySet<SectionId>>(dirty);
+
+  const markDirty = (id: SectionId) => {
+    setJustSaved(false);
+    if (dirtyRef.current.has(id)) return;
+    const next = new Set(dirtyRef.current);
+    next.add(id);
+    dirtyRef.current = next;
+    setDirty(next);
+  };
+
+  const clearDirty = (ids: SectionId[]) => {
+    const next = new Set(dirtyRef.current);
+    for (const id of ids) next.delete(id);
+    dirtyRef.current = next;
+    setDirty(next);
+  };
+
+  /**
+   * Ré-amorçage quand Power Apps repousse les entrées (ex. après un Patch, ou
+   * quand le JSON IA arrive avec ~1 min de retard). Les sections en cours de
+   * saisie sont préservées. Aucun output n'est émis ici : pas de boucle.
+   */
+  useEffect(() => {
+    setEdited((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const def of SECTION_DEFS) {
+        if (dirtyRef.current.has(def.id)) continue;
+        const fresh = seedSection(def, parsed, saved);
+        if (JSON.stringify(fresh) !== JSON.stringify(prev[def.id])) {
+          next[def.id] = fresh;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [parsed, saved]);
 
   const activeSection = SECTION_DEFS.find((s) => s.id === activeId) ?? SECTION_DEFS[0];
   const activeParsed = parsed[activeId];
-  const activeMode = mode[activeId];
+  const isLocked = locked[activeId];
+  const activeMode: Mode = isLocked ? 'manual' : mode[activeId];
+  const hasUnsaved = dirty.size > 0;
 
   const setCell = (gridIdx: number, rowIdx: number, col: string, value: string) => {
-    setSaved(false);
+    markDirty(activeId);
     setEdited((prev) => {
       const next: EditState = { ...prev, [activeId]: prev[activeId].map((g) => g.map((r) => ({ ...r }))) };
       next[activeId][gridIdx][rowIdx][col] = value;
@@ -60,7 +131,7 @@ export function TablesEditor({ cctpJson, onSaveSection, onBack }: TablesEditorPr
   };
 
   const addRow = (gridIdx: number) => {
-    setSaved(false);
+    markDirty(activeId);
     setEdited((prev) => ({
       ...prev,
       [activeId]: prev[activeId].map((g, gi) =>
@@ -72,7 +143,7 @@ export function TablesEditor({ cctpJson, onSaveSection, onBack }: TablesEditorPr
   };
 
   const removeRow = (gridIdx: number, rowIdx: number) => {
-    setSaved(false);
+    markDirty(activeId);
     setEdited((prev) => ({
       ...prev,
       [activeId]: prev[activeId].map((g, gi) =>
@@ -81,18 +152,41 @@ export function TablesEditor({ cctpJson, onSaveSection, onBack }: TablesEditorPr
     }));
   };
 
+  /** N'émet QUE les sections modifiées : les autres colonnes restent intactes. */
   const handleSave = () => {
-    for (const s of SECTION_DEFS) {
+    const touched = SECTION_DEFS.filter((s) => dirty.has(s.id));
+    if (touched.length === 0) {
+      setToastMsg('Aucune modification à enregistrer');
+      setShowToast(true);
+      return;
+    }
+    for (const s of touched) {
       const grids = s.grids.map((g, i) => ({ key: g.key, columns: g.columns, rows: edited[s.id][i] }));
       onSaveSection(s.outputKey, serializeSection(grids));
     }
-    setSaved(true);
+    clearDirty(touched.map((s) => s.id));
+    setJustSaved(true);
+    setToastMsg(touched.length > 1 ? `${touched.length} tableaux CCTP enregistrés` : 'Tableaux CCTP enregistrés');
     setShowToast(true);
   };
 
+  const requestBack = () => (hasUnsaved ? setConfirmLeave(true) : onBack());
+
+  const saveButton = (label?: string) => (
+    <button
+      onClick={handleSave}
+      className="flex items-center gap-2 px-4 py-2 rounded-lg text-white text-sm font-semibold transition-colors"
+      style={{ background: RED, opacity: hasUnsaved || !justSaved ? 1 : 0.75 }}
+    >
+      <Save className="w-4 h-4" />
+      {label ?? (justSaved && !hasUnsaved ? 'Enregistré' : 'Enregistrer')}
+    </button>
+  );
+
   return (
     <div className="absolute inset-0 flex flex-col bg-gray-50">
-      <Toast message="Tableaux CCTP enregistrés" show={showToast} onHide={() => setShowToast(false)} />
+      <Toast message={toastMsg} show={showToast} onHide={() => setShowToast(false)} />
+
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 bg-white border-b border-gray-200 shadow-sm">
         <div className="flex items-center gap-3">
@@ -100,15 +194,13 @@ export function TablesEditor({ cctpJson, onSaveSection, onBack }: TablesEditorPr
           <span className="font-bold text-gray-900" style={{ fontSize: 16 }}>Tableaux CCTP</span>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={handleSave}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-white text-sm font-semibold transition-colors"
-            style={{ background: RED }}
-          >
-            <Save className="w-4 h-4" />
-            {saved ? 'Enregistré' : 'Enregistrer'}
-          </button>
-          <button onClick={onBack} aria-label="Fermer" className="p-2 rounded-lg hover:bg-gray-100 text-gray-500">
+          {hasUnsaved && (
+            <span className="text-xs font-medium mr-1" style={{ color: '#B45F08' }}>
+              Modifications non enregistrées
+            </span>
+          )}
+          {saveButton()}
+          <button onClick={requestBack} aria-label="Fermer" className="p-2 rounded-lg hover:bg-gray-100 text-gray-500">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -122,10 +214,13 @@ export function TablesEditor({ cctpJson, onSaveSection, onBack }: TablesEditorPr
             <button
               key={s.id}
               onClick={() => setActiveId(s.id)}
-              className="px-3 py-2 rounded-lg text-sm font-medium transition-colors"
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
               style={active ? { background: RED, color: '#fff' } : { background: '#F5F6F8', color: '#5A6472' }}
             >
               {s.label}
+              {dirty.has(s.id) && (
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: active ? '#fff' : '#E8830C' }} />
+              )}
             </button>
           );
         })}
@@ -133,28 +228,39 @@ export function TablesEditor({ cctpJson, onSaveSection, onBack }: TablesEditorPr
 
       {/* Corps */}
       <div className="flex-1 overflow-auto p-6">
-        {/* Toggle IA / Saisie main */}
+        {/* Bascule IA / Saisie main — masquée dès que la section a été enregistrée */}
         <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-          <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden">
-            <button
-              onClick={() => setMode((m) => ({ ...m, [activeId]: 'ai' }))}
-              className="flex items-center gap-2 px-4 py-2 text-sm transition-colors"
-              style={activeMode === 'ai' ? { background: RED, color: '#fff' } : { background: '#fff', color: '#5A6472' }}
+          {isLocked ? (
+            <span
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium"
+              style={{ background: 'rgba(31,157,85,0.10)', color: '#1F9D55' }}
             >
-              <Sparkles className="w-4 h-4" /> IA Builder
-            </button>
-            <button
-              onClick={() => setMode((m) => ({ ...m, [activeId]: 'manual' }))}
-              className="flex items-center gap-2 px-4 py-2 text-sm transition-colors"
-              style={activeMode === 'manual' ? { background: RED, color: '#fff' } : { background: '#fff', color: '#5A6472' }}
-            >
-              <PenLine className="w-4 h-4" /> Saisie main
-            </button>
-          </div>
+              <Lock className="w-4 h-4" /> Données enregistrées
+            </span>
+          ) : (
+            <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden">
+              <button
+                onClick={() => setMode((m) => ({ ...m, [activeId]: 'ai' }))}
+                className="flex items-center gap-2 px-4 py-2 text-sm transition-colors"
+                style={activeMode === 'ai' ? { background: RED, color: '#fff' } : { background: '#fff', color: '#5A6472' }}
+              >
+                <Sparkles className="w-4 h-4" /> IA Builder
+              </button>
+              <button
+                onClick={() => setMode((m) => ({ ...m, [activeId]: 'manual' }))}
+                className="flex items-center gap-2 px-4 py-2 text-sm transition-colors"
+                style={activeMode === 'manual' ? { background: RED, color: '#fff' } : { background: '#fff', color: '#5A6472' }}
+              >
+                <PenLine className="w-4 h-4" /> Saisie main
+              </button>
+            </div>
+          )}
           <span className="text-xs text-gray-500">
-            {activeMode === 'ai'
-              ? 'Extrait par l’IA — lecture seule. Passez en « Saisie main » pour corriger.'
-              : 'Saisie manuelle — corrigez, ajoutez ou supprimez des lignes.'}
+            {isLocked
+              ? 'Ces lignes viennent de la fiche enregistrée — elles remplacent l’extraction IA.'
+              : activeMode === 'ai'
+                ? 'Extrait par l’IA — lecture seule. Passez en « Saisie main » pour corriger.'
+                : 'Saisie manuelle — corrigez, ajoutez ou supprimez des lignes.'}
           </span>
         </div>
 
@@ -233,7 +339,57 @@ export function TablesEditor({ cctpJson, onSaveSection, onBack }: TablesEditorPr
             </div>
           );
         })}
+
+        {/* Barre d'action basse : le bouton de l'en-tête sort du viewport dès que
+            la page Power Apps est scrollée. */}
+        {activeMode === 'manual' && (
+          <div
+            className="sticky bottom-0 flex items-center justify-end gap-3 -mx-6 px-6 py-3 bg-white border-t border-gray-200"
+            style={{ boxShadow: '0 -2px 8px rgba(15,23,42,0.06)' }}
+          >
+            <span className="text-xs" style={{ color: hasUnsaved ? '#B45F08' : '#94A3B8' }}>
+              {hasUnsaved ? 'Modifications non enregistrées' : 'Tout est enregistré'}
+            </span>
+            {saveButton()}
+          </div>
+        )}
       </div>
+
+      {/* Confirmation de sortie */}
+      {confirmLeave && (
+        <div className="absolute inset-0 flex items-center justify-center p-6" style={{ background: 'rgba(15,23,42,0.45)' }}>
+          <div className="bg-white rounded-xl shadow-xl p-6" style={{ maxWidth: 420 }}>
+            <div className="flex items-center gap-3 mb-3">
+              <AlertTriangle className="w-5 h-5" style={{ color: '#E8830C' }} />
+              <h3 className="font-bold text-gray-900" style={{ fontSize: 15 }}>Quitter sans enregistrer ?</h3>
+            </div>
+            <p className="text-sm text-gray-500 leading-relaxed mb-5">
+              Des modifications n’ont pas été enregistrées. Elles seront perdues si vous fermez maintenant.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setConfirmLeave(false)}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors"
+              >
+                Continuer la saisie
+              </button>
+              <button
+                onClick={() => { setConfirmLeave(false); handleSave(); onBack(); }}
+                className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-colors"
+                style={{ background: RED }}
+              >
+                Enregistrer et quitter
+              </button>
+              <button
+                onClick={() => { setConfirmLeave(false); onBack(); }}
+                className="px-4 py-2 rounded-lg text-sm font-medium border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors"
+              >
+                Quitter
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

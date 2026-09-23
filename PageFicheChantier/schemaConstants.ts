@@ -5,7 +5,8 @@ import {
     PersistedCurrentSchema,
 } from './types';
 
-export const CURRENT_SCHEMA_VERSION = 1;
+// v1 → v2: elements lost their x/y. Order is now carried by the array itself.
+export const CURRENT_SCHEMA_VERSION = 2;
 
 /**
  * Numeric IDs for schema elements (fixed mapping)
@@ -40,75 +41,63 @@ export function getToolIdFromNumeric(numId: number): SchemaToolId | null {
 }
 
 /**
- * Generate OrdreSchema string from schema elements
- * Format: "1,4,5,1" - numeric IDs ordered by X position
- * Only includes elements on the baseline (Y coord close to BASELINE_Y)
+ * Map an element to its palette tool id.
  */
-export function generateOrdreSchema(
-    elements: SchemaElement[],
-    baselineY = 300,
-    tolerance = 5
-): string {
-    // Map element types to tool IDs
-    const getToolId = (el: SchemaElement): string => {
-        if (el.type === 'termination') {
-            if (el.subtype === 'nzo') return 't-nzo';
-            if (el.subtype === 'droite_directe') return 't-droite';
-            return 't-simple';
-        }
-        if (el.type === 'joint') {
-            if (el.subtype === 'malt') return 'j-malt';
-            if (el.subtype === 'arret_ecran') return 'j-arret';
-            return 'j-simple';
-        }
-        return '';
-    };
+function getToolIdForElement(el: SchemaElement): string {
+    if (el.type === 'termination') {
+        if (el.subtype === 'nzo') return 't-nzo';
+        if (el.subtype === 'droite_directe') return 't-droite';
+        return 't-simple';
+    }
+    if (el.type === 'joint') {
+        if (el.subtype === 'malt') return 'j-malt';
+        if (el.subtype === 'arret_ecran') return 'j-arret';
+        return 'j-simple';
+    }
+    return '';
+}
 
-    // Filter baseline elements and sort by X position (left to right)
-    const baselineElements = elements
-        .filter(el => Math.abs(el.y - baselineY) < tolerance)
-        .sort((a, b) => a.x - b.x);
-
-    // Convert to numeric IDs
-    return baselineElements
-        .map(el => {
-            const toolId = getToolId(el);
-            return getElementNumericId(toolId);
-        })
+/**
+ * Generate the OrdreSchema string from a liaison's elements.
+ * Format: "1,4,5,1" — numeric type codes, in `elements` array order.
+ *
+ * The array order IS the left-to-right order: there is nothing to sort and no
+ * geometry to inspect. A previous version filtered on a hardcoded baseline
+ * (y ≈ 300 ± 5), which silently emptied the ordre of every liaison not drawn
+ * on that exact line — i.e. all but one in a multi-liaison schema.
+ */
+export function generateOrdreSchema(elements: SchemaElement[]): string {
+    return elements
+        .map(el => getElementNumericId(getToolIdForElement(el)))
+        .filter(code => code > 0)
         .join(',');
 }
 
 /**
- * Reconstruct elements from OrdreSchema string
- * For use in another PCF to rebuild the schema
+ * Reconstruct elements from an OrdreSchema CSV ("1,4,5,1").
+ * Legacy path only — the CSV carries no labels and no orientation, so this is
+ * lossy. Used when a record predates the v2 envelope.
  */
-export function reconstructElementsFromOrdre(
-    ordreString: string,
-    baselineY = 300,
-    spacing = 150
-): SchemaElement[] {
+export function reconstructElementsFromOrdre(ordreString: string): SchemaElement[] {
     if (!ordreString) return [];
 
-    const ids = ordreString.split(',').filter(id => id.trim() !== '');
+    return ordreString
+        .split(',')
+        .filter(id => id.trim() !== '')
+        .map((idStr, index) => {
+            const toolId = getToolIdFromNumeric(parseInt(idStr, 10));
+            if (!toolId) return null;
 
-    return ids.map((idStr, index) => {
-        const numId = parseInt(idStr);
-        const toolId = getToolIdFromNumeric(numId);
+            const [type, subtype] = toolId.split('-');
 
-        if (!toolId) return null;
-
-        // Extract type and subtype
-        const [type, subtype] = toolId.split('-');
-
-        return {
-            id: `${Date.now()}_${index}`,
-            type: type === 't' ? 'termination' : 'joint',
-            subtype: subtype === 'simple' ? undefined : subtype,
-            x: 100 + (index * spacing),
-            y: baselineY,
-            orientation: 'left',
-        } as SchemaElement;
-    }).filter(el => el !== null);
+            return {
+                id: generateElementId(index),
+                type: type === 't' ? 'termination' : 'joint',
+                subtype: subtype === 'simple' ? undefined : subtype,
+                orientation: 'left',
+            } as SchemaElement;
+        })
+        .filter((el): el is SchemaElement => el !== null);
 }
 
 /**
@@ -134,8 +123,6 @@ function stripElementId(el: SchemaElement): PersistedSchemaElement {
     return {
         type: el.type,
         subtype: el.subtype,
-        x: el.x,
-        y: el.y,
         orientation: el.orientation,
         hasZ: el.hasZ,
         label: el.label,
@@ -200,6 +187,33 @@ export function parseCurrentSchema(
     return [];
 }
 
+/** A v1 element still carries coordinates; v2 does not. */
+type RawElement = SchemaElement & { x?: unknown; y?: unknown };
+
+/**
+ * Normalize a liaison's elements to v2: ordered array, no coordinates.
+ *
+ * v1 stored the order implicitly in the geometry, so sort by x before dropping
+ * the coordinates. v2 has no x — the array order already is the truth and must
+ * be preserved untouched.
+ */
+function orderAndStripPositions(rawElements: RawElement[]): SchemaElement[] {
+    const isV1 = rawElements.length > 0 && rawElements.every(el => typeof el.x === 'number');
+    const ordered = isV1
+        ? [...rawElements].sort((a, b) => (a.x as number) - (b.x as number))
+        : rawElements;
+
+    // Regenerate the runtime-only id when missing (it is stripped on save).
+    return ordered.map((el, i): SchemaElement => ({
+        id: typeof el.id === 'string' && el.id ? el.id : generateElementId(i),
+        type: el.type,
+        subtype: el.subtype,
+        orientation: el.orientation,
+        hasZ: el.hasZ,
+        label: el.label,
+    }));
+}
+
 function parseCurrentSchemaRaw(json: string): SchemaLiaison[] {
     if (!json?.trim()) return [];
     try {
@@ -209,16 +223,15 @@ function parseCurrentSchemaRaw(json: string): SchemaLiaison[] {
         return liaisons
             .filter((l: unknown): l is Record<string, unknown> => !!l && typeof l === 'object')
             .map((l): SchemaLiaison => {
-                const rawElements = Array.isArray(l.elements) ? (l.elements as SchemaElement[]) : [];
-                // Regenerate the runtime-only id when missing (it is stripped on save).
-                const elements = rawElements.map((el, i): SchemaElement => ({
-                    ...el,
-                    id: typeof el.id === 'string' && el.id ? el.id : generateElementId(i),
-                }));
+                const elements = orderAndStripPositions(
+                    Array.isArray(l.elements) ? (l.elements as RawElement[]) : []
+                );
                 return {
                     id: typeof l.id === 'string' && l.id ? l.id : generateLiaisonId(),
                     comment: typeof l.comment === 'string' ? l.comment : '',
-                    ordreSchema: typeof l.ordreSchema === 'string' ? l.ordreSchema : generateOrdreSchema(elements),
+                    // Always derived, never trusted from storage: v1 records were
+                    // written by the buggy baseline filter and may hold "".
+                    ordreSchema: generateOrdreSchema(elements),
                     elements,
                 };
             });

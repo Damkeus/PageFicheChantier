@@ -1,11 +1,15 @@
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { IInputs } from "./generated/ManifestTypes";
 import './css/input.css';
 
 import { NAV_ITEMS, ProjectData, StepId, AppMode, mapSharePointDataToProjectData, mapProjectDataToSharePointData, AccessoryOption, CableOption, MonteurOption, RawProjectData, INITIAL_DATA, SchemaLiaison } from './types';
+import { relabelAccessories, resolveAccessories } from './accessories';
+import { parseAccessoryOptions, parseCableOptions } from './optionsJson';
+import { cableId, cableLabel, findSelectedCables } from './accessoryCatalog';
 import { generateOrdreSchema, parseCurrentSchema, serializeCurrentSchema } from './schemaConstants';
-import { Input, Select, TextArea, CableSelect, AccessoryList, BooleanCheckbox, MultiSelectCheckbox } from './components/Input';
+import { Input, Select, TextArea, BooleanCheckbox, MultiSelectCheckbox } from './components/Input';
+import { AccessoryWizard } from './components/accessory-wizard/AccessoryWizard';
 import { SchemaEditor } from './components/SchemaEditor';
 import { TablesEditor } from './components/TablesEditor';
 import { WaitState } from './components/WaitState';
@@ -14,27 +18,6 @@ import { FieldLevelContext, isAwaitingAi, isBlankValue, ConfidenceLevel } from '
 import { mergeCctpIntoData, AI_FIELD_KEYS } from './merge';
 import { Check, Upload, FileText, Calendar, ArrowRight, ArrowLeft, MessageSquare, X, Users, PenTool, DownloadCloud, AlertCircle, Eye, ClipboardEdit, Database, Cable, PenLine, Loader2, Monitor, Table2 } from 'lucide-react';
 
-
-const CABLE_OPTIONS = [
-  "Câble HTA 12/20kV 3x150mm² Alu",
-  "Câble HTA 18/30kV 1x240mm² Cu",
-  "Câble HTB 90kV 1x630mm² Alu",
-  "Câble HTB 225kV 1x1200mm² Cu",
-  "Câble BT 0.6/1kV 4x35mm² Cu"
-];
-
-const ACCESSORY_OPTIONS = [
-  "Extrémité 90 kV extérieure synthétique autoporteuse - 630 mm² — Al",
-  "Extrémité 90 kV extérieure synthétique autoporteuse - 1200 mm² — Al",
-  "Extrémité 90 kV extérieure synthétique autoporteuse - 1200 mm² — Cu",
-  "Extrémité 90 kV extérieure synthétique autoporteuse - 1600 mm² — Al",
-  "Extrémité 90 kV extérieure synthétique autoporteuse - 1600 mm² — Cu",
-  "Système auto-porteur pour extrémités 90 kV — Al",
-  "Jonction isolée rubanée 90kV",
-  "Prise d'écran pour câble HTB",
-  "Boîte de jonction 24kV rétractable à froid",
-  "Connecteur séparable équerre 630A"
-];
 
 export interface IAppProps {
   pcfContext?: ComponentFramework.Context<IInputs>;
@@ -45,86 +28,28 @@ export interface IAppProps {
   monteursOptionsJson?: string;
   /** JSON allégé (labels + tables) extrait du CCTP par AI Builder. */
   cctpJson?: string;
+  /** JSON combiné des 5 colonnes de tableaux CCTP déjà enregistrées (prime sur l'IA). */
+  savedTablesJson?: string;
   onDataChange?: (newDataJson: string) => void;
-  onSchemaChange?: (schemaJson: string) => void;
+  /** Émet l'enveloppe de schéma + le ProjectUniqID consommés par le flux VerifierDossiersSchema. */
+  onSchemaChange?: (schemaJson: string, projectUniqId: string) => void;
   /** Émet le JSON d'une section de tableaux CCTP vers son output dédié. */
   onTablesChange?: (outputKey: string, json: string) => void;
 }
 
 export default function App(props: IAppProps) {
-  const { pcfContext, projectDataJson, currentSchemaJson, accessoriesOptionsJson, cablesOptionsJson, monteursOptionsJson, cctpJson, onDataChange, onSchemaChange, onTablesChange } = props;
+  const { pcfContext, projectDataJson, currentSchemaJson, accessoriesOptionsJson, cablesOptionsJson, monteursOptionsJson, cctpJson, savedTablesJson, onDataChange, onSchemaChange, onTablesChange } = props;
 
-  // Parse options helper
-  const parseOptionsOriginal = <T,>(json: string | undefined): T[] => {
-    if (!json) return [];
-    try {
-      return JSON.parse(json) as T[];
-    } catch (e) {
-      console.error("Failed to parse options json", e);
-      return [];
-    }
-  };
-
-  const parseOptions = <T,>(json: string | undefined, mapper: (item: T) => string): string[] => {
-    if (!json) return [];
-    try {
-      const parsed = JSON.parse(json) as T[];
-      return parsed.map(mapper).filter(Boolean);
-    } catch (e) {
-      console.error("Failed to parse options json", e);
-      return [];
-    }
-  };
-
-  // Accessories Mapper Logic
-  // Accessories Mapper Logic
-  const accessoryMapper = (opt: AccessoryOption): string => {
-    // 🟢 Updated Requirement: Use field_5 + Ame
-    const part1 = opt.field_5 || opt.Title; // Fallback to Title if field_5 is missing
-    const part2 = opt.Ame ? ` - ${opt.Ame}` : "";
-    return (part1 + part2) || "";
-  };
-
-  const cableMapper = (opt: CableOption): string => {
-    return [
-      opt.Title,
-      opt.Section,
-      opt.Ame,
-      opt.D_x00e9_tailssuppl_x00e9_mentair,
-      opt._x00c2_me,
-      opt.OData__x00c2_me
-    ].filter(Boolean).join(" - ");
-  };
-
-  const [accessoriesList, setAccessoriesList] = useState<string[]>([]);
   const [fullAccessoriesList, setFullAccessoriesList] = useState<AccessoryOption[]>([]);
-
-  const [cablesList, setCablesList] = useState<string[]>([]);
   const [fullCablesList, setFullCablesList] = useState<CableOption[]>([]);
 
   const [monteursList, setMonteursList] = useState<string[]>([]);
   const [fullMonteursList, setFullMonteursList] = useState<MonteurOption[]>([]);
 
   useEffect(() => {
-    if (accessoriesOptionsJson) {
-      // 🟢 Store Full Objects
-      const parsed = parseOptionsOriginal<AccessoryOption>(accessoriesOptionsJson);
-      setFullAccessoriesList(parsed);
-      // Map for UI
-      setAccessoriesList(parsed.map(accessoryMapper).filter(Boolean));
-    } else {
-      setAccessoriesList(ACCESSORY_OPTIONS);
-    }
-
-    if (cablesOptionsJson) {
-      // 🟢 Store Full Objects
-      const parsed = parseOptionsOriginal<CableOption>(cablesOptionsJson);
-      setFullCablesList(parsed);
-      // Map for UI
-      setCablesList(parsed.map(cableMapper).filter(Boolean));
-    } else {
-      setCablesList(CABLE_OPTIONS);
-    }
+    // Re-parsé à chaque nouveau JSON poussé par Power Apps : le wizard suit la collection en direct.
+    setFullAccessoriesList(parseAccessoryOptions(accessoriesOptionsJson));
+    setFullCablesList(parseCableOptions(cablesOptionsJson));
 
     if (monteursOptionsJson) {
       try {
@@ -176,13 +101,16 @@ export default function App(props: IAppProps) {
   );
   const [liaisons, setLiaisons] = useState<SchemaLiaison[]>(getInitialLiaisons);
 
-  // Sync incoming currentSchema changes from Power Apps
+  // Recharge le schéma à chaque nouvelle fiche OU nouveau currentSchema.
+  // On rejoue exactement la logique de montage (currentSchema, puis fallback
+  // legacy schemaData/ordreSchema de la fiche courante) à partir des deux
+  // entrées brutes : elles arrivent ensemble dans le même updateView, donc
+  // aucune dépendance au timing de l'état `data`.
+  // Le garde `parsed.length > 0` précédent laissait les liaisons du projet
+  // précédent affichées dès que la nouvelle fiche n'avait pas de schéma.
   useEffect(() => {
-    const parsed = parseCurrentSchema(currentSchemaJson || "");
-    if (parsed.length > 0) {
-      setLiaisons(parsed);
-    }
-  }, [currentSchemaJson]);
+    setLiaisons(getInitialLiaisons());
+  }, [currentSchemaJson, projectDataJson]);
 
   // Detect mobile portrait mode
   const rootRef = useRef<HTMLDivElement>(null);
@@ -243,6 +171,18 @@ export default function App(props: IAppProps) {
     }
   }, [projectDataJson, cctpJson]);
 
+  // Nouveau référentiel accessoires (ou nouvelle fiche) : la sélection est ramenée sur les
+  // libellés courants par ID, pour ne pas afficher « introuvable » après un simple renommage.
+  // Déclaré APRÈS la synchro de fiche : les effets s'exécutent dans l'ordre, ce setData
+  // fonctionnel s'applique donc sur la fiche fraîchement chargée.
+  useEffect(() => {
+    if (fullAccessoriesList.length === 0) return;
+    setData(prev => {
+      const accessories = relabelAccessories(prev.accessories, fullAccessoriesList, prev.accessoryEntries);
+      return accessories === prev.accessories ? prev : { ...prev, accessories };
+    });
+  }, [fullAccessoriesList, projectDataJson]);
+
   // Patch/Save state
   const [isSaving, setIsSaving] = useState(false);
   const [patchResult, setPatchResult] = useState<{ success: boolean, message?: string } | null>(null);
@@ -262,6 +202,21 @@ export default function App(props: IAppProps) {
     if (isViewMode) return; // Prevent edits in view mode
     setData(prev => ({ ...prev, [field]: value }));
   };
+
+  // Libellé et ID mis à jour ensemble : l'ID survit au rechargement, le libellé sert à l'affichage.
+  const handleCablesChange = (next: CableOption[]) => {
+    if (isViewMode) return;
+    setData(prev => ({
+      ...prev,
+      cables: next.map(cableLabel),
+      cableIds: next.map(cableId).filter((id): id is number => id !== undefined),
+    }));
+  };
+
+  const selectedCableLabels = useMemo(
+    () => findSelectedCables(fullCablesList, data.cables, data.cableIds ?? []).map(cableLabel),
+    [fullCablesList, data.cables, data.cableIds],
+  );
 
   const currentStepIndex = NAV_ITEMS.findIndex(item => item.id === activeStep);
   const progress = Math.round(((currentStepIndex) / (NAV_ITEMS.length - 1)) * 100);
@@ -284,6 +239,18 @@ export default function App(props: IAppProps) {
     setPatchResult(null);
 
     try {
+      // Un accessoire non rattaché au référentiel n'atteindra pas la colonne `Accessoire`,
+      // donc pas le flux PAQ2 non plus. On le dit, au lieu de le supprimer en silence.
+      const { unresolved } = resolveAccessories(data.accessories, fullAccessoriesList, data.accessoryEntries);
+      if (unresolved.length > 0) {
+        setIsSaving(false);
+        setPatchResult({
+          success: false,
+          message: `${unresolved.length} accessoire(s) introuvable(s) dans le référentiel — re-sélectionnez-les : ${unresolved.join(' ; ')}`,
+        });
+        return;
+      }
+
       // Map current form data to SharePoint column format
       const mappedData = mapProjectDataToSharePointData(data, fullAccessoriesList, fullCablesList, fullMonteursList);
       const fullData = { ...(rawSharePointData || {}), ...mappedData };
@@ -377,7 +344,7 @@ export default function App(props: IAppProps) {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4">
               <Input
-                label="Adresse Chantier"
+                label="Centre DI"
                 value={data.siteAddress}
                 className={!isViewMode ? "bg-gray-50" : ""}
                 readOnly={isViewMode}
@@ -401,11 +368,12 @@ export default function App(props: IAppProps) {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <Input label="CCTP Ref" value={data.cctpRef} readOnly={isViewMode} onChange={e => handleInputChange('cctpRef', e.target.value)} />
               <Input label="Numéro Commande client" value={data.clientOrderNumber} readOnly={isViewMode} onChange={e => handleInputChange('clientOrderNumber', e.target.value)} />
-              <Input label="N°Marché" value={data.contractNumber} readOnly={isViewMode} onChange={e => handleInputChange('contractNumber', e.target.value)} />
+              <Input label="Numéro Projet (FRH)" value={data.contractNumber} readOnly={isViewMode} onChange={e => handleInputChange('contractNumber', e.target.value)} />
+              <Input label="N°Marché" value={data.marketNumber} readOnly={isViewMode} onChange={e => handleInputChange('marketNumber', e.target.value)} />
               <Input label="Longueur (mètre)" value={data.length} readOnly={isViewMode} onChange={e => handleInputChange('length', e.target.value)} />
             </div>
 
-            <Input label="Adresse Chantier" value={data.siteAddress} readOnly={isViewMode} onChange={e => handleInputChange('siteAddress', e.target.value)} isTextArea rows={3} />
+            <Input label="Centre DI" value={data.siteAddress} readOnly={isViewMode} onChange={e => handleInputChange('siteAddress', e.target.value)} isTextArea rows={3} />
 
             {/* Technical specs */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 border-t pt-4">
@@ -431,51 +399,28 @@ export default function App(props: IAppProps) {
           <div className="space-y-6 animate-in fade-in duration-500">
             <h3 className="text-xl font-bold text-[#A30026] border-b pb-2">Info Travaux</h3>
 
-            {/* Cable Selection */}
-            <div className="space-y-2 pt-4">
-              <CableSelect
-                label="Type de Câble"
-                values={data.cables}
-                onChange={(vals) => handleInputChange('cables', vals)}
-                options={cablesList}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4">
+              <Input
+                label="Durée des essais (jours)"
+                type="number"
+                value={data.testDuration}
                 readOnly={isViewMode}
+                onChange={e => handleInputChange('testDuration', e.target.value)}
               />
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-full min-h-[300px]">
-              {/* Accessories */}
-              <AccessoryList
-                label="Accessoires"
-                selectedItems={data.accessories}
-                onChange={(val) => handleInputChange('accessories', val)}
-                options={accessoriesList}
+              <Input
+                label="Date de Consignation"
+                type="date"
+                value={data.dateConsignation}
                 readOnly={isViewMode}
+                onChange={e => handleInputChange('dateConsignation', e.target.value)}
               />
-
-              {/* Test Duration & Consignation */}
-              <div className="flex flex-col gap-6">
-                <Input
-                  label="Durée des essais (jours)"
-                  type="number"
-                  value={data.testDuration}
-                  readOnly={isViewMode}
-                  onChange={e => handleInputChange('testDuration', e.target.value)}
-                />
-                <Input
-                  label="Date de Consignation"
-                  type="date"
-                  value={data.dateConsignation}
-                  readOnly={isViewMode}
-                  onChange={e => handleInputChange('dateConsignation', e.target.value)}
-                />
-                <Input
-                  label="Date de Fin de consignation"
-                  type="date"
-                  value={data.dateFinConsignation}
-                  readOnly={isViewMode}
-                  onChange={e => handleInputChange('dateFinConsignation', e.target.value)}
-                />
-              </div>
+              <Input
+                label="Date de Fin de consignation"
+                type="date"
+                value={data.dateFinConsignation}
+                readOnly={isViewMode}
+                onChange={e => handleInputChange('dateFinConsignation', e.target.value)}
+              />
             </div>
 
             {/* New Travaux fields */}
@@ -485,6 +430,23 @@ export default function App(props: IAppProps) {
               <Input label="Extrémité Poste" value={data.extremitePoste} readOnly={isViewMode} onChange={e => handleInputChange('extremitePoste', e.target.value)} />
               <Input label="Phénomène d'induction" value={data.phenomeneInduction} readOnly={isViewMode} onChange={e => handleInputChange('phenomeneInduction', e.target.value)} />
             </div>
+          </div>
+        );
+
+      case 'accessories':
+        return (
+          <div className="space-y-6 animate-in fade-in duration-500">
+            <h3 className="text-xl font-bold text-[#A30026] border-b pb-2">Câbles & Accessoires</h3>
+            <AccessoryWizard
+              cableOptions={fullCablesList}
+              accessoryOptions={fullAccessoriesList}
+              selectedCableLabels={data.cables}
+              selectedCableIds={data.cableIds ?? []}
+              onCablesChange={handleCablesChange}
+              selectedAccessories={data.accessories}
+              onAccessoriesChange={(next) => handleInputChange('accessories', next)}
+              readOnly={isViewMode}
+            />
           </div>
         );
 
@@ -577,8 +539,12 @@ export default function App(props: IAppProps) {
                   // Update Name
                   handleInputChange('workManagerName', selectedName);
 
-                  // Update Phone & Email if found
-                  // Update Phone & Email if found
+                  // L'ID est ce qui part réellement dans le lookup SharePoint : sans lui,
+                  // la colonne était patchée avec Id 0 et le nom ne s'enregistrait pas.
+                  // On le remet à 0 quand le nom ne correspond à aucun monteur, pour ne
+                  // jamais laisser un ID pointer sur quelqu'un d'autre que le nom affiché.
+                  handleInputChange('workManagerId', selectedMonteur?.ID ?? selectedMonteur?.Id ?? 0);
+
                   if (selectedMonteur) {
                     handleInputChange('workManagerPhone', selectedMonteur.field_1 || "");
                     handleInputChange('workManagerEmail', selectedMonteur.field_2 || "");
@@ -910,9 +876,9 @@ export default function App(props: IAppProps) {
                     <div className="flex justify-between items-baseline">
                       <dt className="text-gray-500 font-medium">Câbles:</dt>
                       <dd className="font-bold text-gray-900 text-right">
-                        {data.cables.length > 0 ? (
+                        {selectedCableLabels.length > 0 ? (
                           <ul className="text-right">
-                            {data.cables?.map((c, i) => <li key={i}>{c}</li>)}
+                            {selectedCableLabels.map((c, i) => <li key={i}>{c}</li>)}
                           </ul>
                         ) : "Non spécifié"}
                       </dd>
@@ -978,21 +944,29 @@ export default function App(props: IAppProps) {
     }
   };
 
-  // Handle Schema Save — persists the multi-liaison JSON via currentSchema output,
-  // and keeps the legacy single-schema fields in sync (first liaison) for compat.
+  // Handle Schema Save — the v2 envelope is the single source of truth and goes
+  // out on both paths (schemaChange output + SchemaData column), so whichever one
+  // Power Apps binds, it receives the full multi-liaison payload.
   const handleSchemaSave = (savedLiaisons: SchemaLiaison[]) => {
     setLiaisons(savedLiaisons);
 
-    // Emit the multi-liaison JSON envelope (read later by other PCFs)
+    const envelope = serializeCurrentSchema(savedLiaisons);
+
+    // Emit the multi-liaison JSON envelope (read later by other PCFs). Le
+    // ProjectUniqID part avec, pour que Power Apps puisse appeler le flux
+    // VerifierDossiersSchema sans avoir à réextraire l'identifiant du projet.
     if (onSchemaChange) {
-      onSchemaChange(serializeCurrentSchema(savedLiaisons));
+      onSchemaChange(envelope, data.projectUniqId);
     }
 
-    // Legacy backward-compat: mirror the first liaison into schemaData/ordreSchema
-    const firstElements = savedLiaisons[0]?.elements ?? [];
-    const ordreSchema = generateOrdreSchema(firstElements);
-    const schemaData = JSON.stringify(firstElements);
-    const newData = { ...data, schemaData, ordreSchema };
+    // SchemaData carries the same envelope — order + comments + labels + every
+    // liaison. `ordreSchema` is kept only as a read-only CSV convenience for
+    // Power Apps (first liaison); it is never read back by the editor.
+    const newData = {
+      ...data,
+      schemaData: envelope,
+      ordreSchema: generateOrdreSchema(savedLiaisons[0]?.elements ?? []),
+    };
     setData(newData);
 
     if (onDataChange) {
@@ -1013,13 +987,20 @@ export default function App(props: IAppProps) {
   }
 
   if (appMode === 'schema') {
-    return <SchemaEditor initialLiaisons={liaisons} onBack={() => setAppMode('landing')} onSave={handleSchemaSave} />;
+    /* Même raison que TablesEditor : l'éditeur sème son état local depuis
+       initialLiaisons au montage seulement, donc changer de fiche pendant
+       qu'il est ouvert doit le remonter, sinon l'ancien schéma reste. */
+    return <SchemaEditor key={data.id || 'nouvelle-fiche'} initialLiaisons={liaisons} onBack={() => setAppMode('landing')} onSave={handleSchemaSave} />;
   }
 
   if (appMode === 'tables') {
     return (
       <TablesEditor
+        /* Remonte l'éditeur quand on change de fiche : sinon les lignes en
+           cours de saisie de la fiche précédente resteraient à l'écran. */
+        key={data.id || 'nouvelle-fiche'}
         cctpJson={cctpJson}
+        savedTablesJson={savedTablesJson}
         onSaveSection={(outputKey, json) => onTablesChange?.(outputKey, json)}
         onBack={() => setAppMode('landing')}
       />
